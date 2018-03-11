@@ -1,0 +1,2 @@
+# libshasm
+Shastina metainterpreter
