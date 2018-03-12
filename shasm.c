@@ -6,6 +6,70 @@
  * See README.md for a summary of the current development work.
  */
 
+#include <stdio.h>    /* only for the testing program */
+#include <stdlib.h>
+
+/*
+ * Print the current line number at the start of a new line of output.
+ * 
+ * The current line number will be determined by querying the line count
+ * filter.
+ * 
+ * The line number will be printed as three zero-padded digits, with a
+ * fault if the line number is outside of the range 0-999.  After the
+ * digits there will be a colon followed by a space.
+ */
+static void printLineNumber(void) {
+
+  long line_num = 0;
+  
+  /* @@TODO: once the line number filter is written, replace this code
+   * with a call to the filter to determine the line number, converting
+   * the result to a signed long */
+  line_num = 12;
+  
+  /* Check that line number is in range */
+  if ((line_num < 0) || (line_num > 999)) {
+    fprintf(stderr, "Line number out of range!\n");
+    abort();
+  }
+  
+  /* Print the line number */
+  printf("%03ld: ", line_num);
+}
+
+/*
+ * Print a given unsigned byte value, replacing it with a text
+ * representation if it is outside non-whitespace US-ASCII range.
+ * 
+ * The given value must be in unsigned byte range 0-255 or there will be
+ * a fault.  If the value is in range 0x21-0x7e, then it is printed to
+ * standard output as-is.  Otherwise, it is printed as "<ab>" where a
+ * and b are base-16 digits that represent the unsigned value of the
+ * byte in base-16.
+ * 
+ * Parameters:
+ * 
+ *   c - the unsigned byte value to print
+ */
+static void printByte(int c) {
+  
+  /* Check parameter */
+  if ((c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Determine how to print the value */
+  if ((c >= 0x21) && (c <= 0x7e)) {
+    /* In non-whitespace US-ASCII printing range -- print directly */
+    putchar(c);
+    
+  } else {
+    /* Not in visible printing range -- print as <ab> representation */
+    printf("<%02x>", c);
+  }
+}
+
 /*
  * Program entrypoint.
  * 
@@ -62,5 +126,9 @@
  */
 int main(int argc, char *argv[]) {
   /* @@TODO: */
+  printLineNumber();
+  printByte(0x21);
+  printByte(0xa);
+  printf("\n");
   return 0;
 }
