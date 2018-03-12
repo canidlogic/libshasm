@@ -6,9 +6,160 @@
  * See README.md for a summary of the current development work.
  */
 
-#include <stdio.h>
+#include <stddef.h>
+#include <stdio.h>  /* only for testing functions */
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Special state codes that the shasm_fp_input callback can return.
+ */
+#define SHASM_INPUT_EOF   (-1)    /* End of file */
+#define SHASM_INPUT_IOERR (-2)    /* I/O error   */
+
+/*
+ * Function pointer type for the input reader function.
+ * 
+ * This is the callback that Shastina's input filter chain uses to read
+ * raw input bytes from the actual input.
+ * 
+ * The function takes a single argument, which is a custom pass-through
+ * pointer.
+ * 
+ * The return value is the next byte read, which is either an unsigned
+ * byte value (0-255) or SHASM_INPUT_EOF if no more bytes to read, or
+ * SHASM_INPUT_IOERR if there was an I/O error trying to read a byte.
+ * 
+ * Once the function returns SHASM_INPUT_EOF or SHASM_INPUT_IOERR, it
+ * will not be called again by the input filter chain.
+ */
+typedef int (*shasm_fp_input)(void *);
+
+/*
+ * Structure for storing state information of input filter chain.
+ * 
+ * Use shasm_iflstate_init to properly initialize this structure.
+ */
+typedef struct {
+  
+  /* 
+   * The callback for reading raw bytes of input, along with the custom
+   * pass-through pointer that is passed to it.
+   */
+  shasm_fp_input fpin;
+  void *pCustomIn;
+  
+  /*
+   * The final state of the raw input function.
+   * 
+   * If zero, the raw input function has not yet reached a final state.
+   * 
+   * If SHASM_INPUT_EOF, the raw input function has returned EOF and
+   * should not be called again.
+   * 
+   * If SHASM_INPUT_IOERR, the raw input function has returned an I/O
+   * error (or it returned an invalid value that was interpreted as an
+   * I/O error by the filter chain).  The function should not be called
+   * again.
+   */
+  int final_raw;
+  
+  /* @@TODO: */
+
+} SHASM_IFLSTATE;
+
+/* Function prototypes for Shastina functions */
+static void shasm_iflstate_init(
+    SHASM_IFLSTATE *ps,
+    shasm_fp_input fpin,
+    void *pCustom);
+static int shasm_input_read(SHASM_IFLSTATE *ps);
+
+/*
+ * Properly initialize an input filter chain state structure.
+ * 
+ * Pass the callback for reading raw input bytes, as well as the custom
+ * pass-through parameter to pass to this callback (NULL is allowed).
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter chain state structure to initialize
+ * 
+ *   fpin - the raw input callback (may not be NULL)
+ * 
+ *   pCustom - the custom pass-through parameter to pass to the raw
+ *   input callback (may be NULL)
+ */
+static void shasm_iflstate_init(
+    SHASM_IFLSTATE *ps,
+    shasm_fp_input fpin,
+    void *pCustom) {
+  
+  /* Check parameters */
+  if ((ps == NULL) || (fpin == NULL)) {
+    abort();
+  }
+  
+  /* Clear structure */
+  memset(ps, 0, sizeof(SHASM_IFLSTATE));
+  
+  /* Initialize structure fields */
+  ps->fpin = fpin;
+  ps->pCustomIn = pCustom;
+  ps->final_raw = 0;
+  
+  /* @@TODO: make sure this function is up to date with the
+   * SHASM_IFLSTATE structure */
+}
+
+/*
+ * Use the raw input callback in the input filter state structure to
+ * read a raw byte of input from the underlying input source.
+ * 
+ * The return value is either an unsigned byte value (0-255), or
+ * SHASM_INPUT_EOF for end of input, or SHASM_INPUT_IOERR for I/O error.
+ * 
+ * If the raw input function returns something other than these allowed
+ * possibilities, it is changed by this function to SHASM_INPUT_IOERR
+ * and handled that way.
+ * 
+ * Once this function returns SHASM_INPUT_EOF or SHASM_INPUT_IOERR, it
+ * will return that on all subsequent calls and no longer make any
+ * further calls to the raw input function.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state structure
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_read(SHASM_IFLSTATE *ps) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Check if already a final result */
+  if (final_raw == 0) {
+    /* No final result yet -- call through to raw input reader */
+    result = (*(ps->fpin))(ps->pCustomIn);
+    
+    /* Handle possible results */
+    /* @@TODO: */
+    
+  } else {
+    /* Already a final result -- just return that */
+    result = final_raw;
+  }
+  
+  /* @@TODO: */
+}
 
 /*
  * Read the next byte of input from the input filter chain.
