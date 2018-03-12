@@ -6,6 +6,7 @@
  * See README.md for a summary of the current development work.
  */
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>  /* only for testing functions */
 #include <stdlib.h>
@@ -74,6 +75,7 @@ static void shasm_iflstate_init(
     shasm_fp_input fpin,
     void *pCustom);
 static int shasm_input_read(SHASM_IFLSTATE *ps);
+static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
 
@@ -171,6 +173,32 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
   
   /* Return result */
   return result;
+}
+
+/*
+ * Return whether the underlying raw input began with a UTF-8 Byte Order
+ * Mark (BOM) that the input filter chain filtered out.
+ * 
+ * This can be used before any filtered bytes have been read.  In this
+ * case, the function will read the first filtered byte and then unread
+ * it.  The BOM filter will then be queried to see if it read a BOM at
+ * the start of input.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   non-zero if a UTF-8 BOM was present at the start of raw input, zero
+ *   if not
+ */
+static int shasm_input_hasbom(SHASM_IFLSTATE *ps) {
+  /* @@TODO:  finish this once the BOM filter and pushback buffer filter
+   * have been implemented -- for now just return a dummy value */
+  /* @@TODO:  after BOM filter is complete, implement a temporary
+   * version that doesn't use the pushback feature yet */
+  return 0;
 }
 
 /*
@@ -517,11 +545,10 @@ static int rawInput(void *pCustom) {
  * base-16 digits of the unsigned byte value.  A normal space character
  * will be written as a space and not as an <ab> pair.
  * 
- * (3) After all the filtered results have been printed, a final status
- * line will be printed that reports the line number as determined by
- * the line count filter at the very end of input.  The report will also
- * indicate if a UTF-8 Byte Order Mark (BOM) has been filtered out by
- * the filter chain.
+ * (3) After all the filtered results have been printed, the final line
+ * count as determined by the line count filter and whether or not a
+ * UTF-8 Byte Order Mark (BOM) was present will be printed out on
+ * separate lines.
  * 
  * In doubling mode, the filtered input will be echoed to standard
  * output without any of the output filters described above.  Instead,
@@ -548,6 +575,7 @@ int main(int argc, char *argv[]) {
   
   int status = 1;
   int doubling = 0;
+  long lcount = 0;
   SHASM_IFLSTATE ifs;
   
   /* Initialize input state structure */
@@ -597,8 +625,24 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "I/O error!\n");
     }
     
-    /* @@TODO: print final line with line count and BOM suppression once
-     * those filters have been written */
+    /* Print total number of lines */
+    if (status) {
+      lcount = shasm_input_count(&ifs);
+      if (lcount != LONG_MAX) {
+        printf("\nTotal line count: %ld\n", lcount);
+      } else {
+        printf("\nTotal line count: (overflow)\n");
+      }
+    }
+    
+    /* Print whether there was a BOM */
+    if (status) {
+      if (shasm_input_hasbom(&ifs)) {
+        printf("UTF-8 BOM was present.\n");
+      } else {
+        printf("UTF-8 BOM was absent.\n");
+      }
+    }
   }
   
   /* Invert status */

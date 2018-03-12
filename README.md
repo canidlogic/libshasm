@@ -40,7 +40,7 @@ Finally, the program will support a special mode where the output of the filter 
 ### 3.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [ ] Write the testing program with no filters yet
+- [x] Write the testing program with no filters yet
 - [ ] Add the UTF-8 Byte Order Mark (BOM) filter
 - [ ] Add the line break conversion filter
 - [ ] Add the final LF filter
