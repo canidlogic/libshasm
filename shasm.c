@@ -6,8 +6,9 @@
  * See README.md for a summary of the current development work.
  */
 
-#include <stdio.h>    /* only for the testing program */
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /*
  * Read the next byte of input from the input filter chain.
@@ -77,7 +78,7 @@ static void printLineNumber(void) {
  * representation if it is outside non-whitespace US-ASCII range.
  * 
  * The given value must be in unsigned byte range 0-255 or there will be
- * a fault.  If the value is in range 0x21-0x7e, then it is printed to
+ * a fault.  If the value is in range 0x20-0x7e, then it is printed to
  * standard output as-is.  Otherwise, it is printed as "<ab>" where a
  * and b are base-16 digits that represent the unsigned value of the
  * byte in base-16.
@@ -94,8 +95,8 @@ static void printByte(int c) {
   }
   
   /* Determine how to print the value */
-  if ((c >= 0x21) && (c <= 0x7e)) {
-    /* In non-whitespace US-ASCII printing range -- print directly */
+  if ((c >= 0x20) && (c <= 0x7e)) {
+    /* In US-ASCII printing range -- print directly */
     putchar(c);
     
   } else {
@@ -112,11 +113,13 @@ static void printByte(int c) {
  * the function uses readNextByte to read bytes until either LF (0xa),
  * EOF, or I/O error is encountered.  Bytes before LF, EOF, or I/O error
  * are printed with printByte.  If LF is encountered, the function
- * prints it with printByte, prints an actual line break to output, and
- * returns one to indicate that more lines should be printed.  If EOF is
- * encountered, the function returns zero to indicate no further lines
- * should be printed.  If an I/O error is encountered, the function
- * returns -1.
+ * prints it with printByte and returns one to indicate that more lines
+ * should be printed.  If EOF is encountered, the function returns zero
+ * to indicate no further lines should be printed.  If an I/O error is
+ * encountered, the function returns -1.
+ * 
+ * In all cases, the function prints an actual line break at the end of
+ * the line.
  * 
  * This function does not report the I/O error, leaving that for the
  * caller.
@@ -138,11 +141,13 @@ static int printFullLine(void) {
     printByte(c);
   }
   
-  /* If LF, print that too, followed by an actual line break */
+  /* If LF, print that too */
   if (c == 0xa) {
     printByte(c);
-    putchar('\n');
   }
+  
+  /* Print an actual line break */
+  putchar('\n');
   
   /* Set c to the return value depending on its current state */
   if (c == 0xa) {
@@ -220,9 +225,10 @@ static int printAllLines(void) {
  * line count filter will be written as a zero-padded three-digit number
  * followed by a colon and a space.
  * 
- * (2) All filtered bytes that are outside of non-whitespace US-ASCII
- * printing range (0x21-0x7e) will be written in the form <ab> where a
- * and b are the base-16 digits of the unsigned byte value.
+ * (2) All filtered bytes that are outside of US-ASCII printing range
+ * (0x20-0x7e) will be written in the form <ab> where a and b are the
+ * base-16 digits of the unsigned byte value.  A normal space character
+ * will be written as a space and not as an <ab> pair.
  * 
  * (3) After all the filtered results have been printed, a final status
  * line will be printed that reports the line number as determined by
@@ -252,7 +258,65 @@ static int printAllLines(void) {
  *   zero if successful, one if there was an error
  */
 int main(int argc, char *argv[]) {
-  /* @@TODO: */
-  printAllLines();
-  return 0;
+  
+  int status = 1;
+  int doubling = 0;
+  
+  /* Determine if doubling mode in effect by examining parameters */
+  if (argc < 2) {
+    /* No parameters beyond module name -- doubling mode not in
+     * effect */
+    doubling = 0;
+    
+  } else if (argc == 2) {
+    /* Exactly one additional parameter -- check that it is "d" */
+    if (argv == NULL) {
+      abort();
+    }
+    if (argv[1] == NULL) {
+      abort();
+    }
+    if (strcmp(argv[1], "d") != 0) {
+      status = 0;
+      fprintf(stderr, "Invalid program argument!\n");
+    }
+    
+    /* Set doubling mode */
+    if (status) {
+      doubling = 1;
+    }
+    
+  } else {
+    /* Invalid number of parameters */
+    status = 0;
+    fprintf(stderr, "Expecting at most one additional argument!\n");
+  }
+  
+  /* Run program depending on whether doubling mode is selected */
+  if (status && doubling) {
+    /* Doubling mode */
+    /* @@TODO: write this once pushback filter has been implemented */
+    status = 0;
+    fprintf(stderr, "Doubling mode not yet implemented!\n");
+    
+  } else if (status) {
+    /* Normal mode -- begin by printing all lines */
+    if (!printAllLines()) {
+      status = 0;
+      fprintf(stderr, "I/O error!\n");
+    }
+    
+    /* @@TODO: print final line with line count and BOM suppression once
+     * those filters have been written */
+  }
+  
+  /* Invert status */
+  if (status) {
+    status = 0;
+  } else {
+    status = 1;
+  }
+  
+  /* Return inverted status */
+  return status;
 }
