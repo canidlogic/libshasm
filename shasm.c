@@ -10,14 +10,48 @@
 #include <stdlib.h>
 
 /*
+ * Read the next byte of input from the input filter chain.
+ * 
+ * The return value is an unsigned byte value (0-255).  -1 is returned
+ * if EOF is encountered.  -2 is returned if there was an I/O error.
+ * 
+ * Return:
+ * 
+ *   the next filtered byte from the input filter chain, or -1 for EOF,
+ *   or -2 if I/O error
+ */
+static int readNextByte(void) {
+  
+  int c = 0;
+  
+  /* @@TODO: replace the following call with a call to the input filter
+   * chain -- at the moment input is taken directly from standard
+   * input */
+  c = getchar();
+  if (c == EOF) {
+    /* Determine whether EOF or I/O error and set c appropriately */
+    if (ferror(stdin)) {
+      /* I/O error */
+      c = -2;
+    } else {
+      /* EOF */
+      c = -1;
+    }
+  }
+  
+  /* Return result */
+  return c;
+}
+
+/*
  * Print the current line number at the start of a new line of output.
  * 
  * The current line number will be determined by querying the line count
  * filter.
  * 
- * The line number will be printed as three zero-padded digits, with a
- * fault if the line number is outside of the range 0-999.  After the
- * digits there will be a colon followed by a space.
+ * The line number will be printed as three zero-padded digits, with
+ * "???" printed if the line number is outside the range 0-999.  After
+ * the digits there will be a colon followed by a space.
  */
 static void printLineNumber(void) {
 
@@ -28,14 +62,14 @@ static void printLineNumber(void) {
    * the result to a signed long */
   line_num = 12;
   
-  /* Check that line number is in range */
-  if ((line_num < 0) || (line_num > 999)) {
-    fprintf(stderr, "Line number out of range!\n");
-    abort();
+  /* Check whether line number is in range */
+  if ((line_num >= 0) && (line_num <= 999)) {
+    /* In range -- print the line number */
+    printf("%03d: ", (int) line_num);
+  } else {
+    /* Out of range -- print "???" for line number */
+    printf("???: ");
   }
-  
-  /* Print the line number */
-  printf("%03ld: ", line_num);
 }
 
 /*
@@ -68,6 +102,99 @@ static void printByte(int c) {
     /* Not in visible printing range -- print as <ab> representation */
     printf("<%02x>", c);
   }
+}
+
+/*
+ * Print a full line of filtered input, passing the results through the
+ * normal mode output filters.
+ * 
+ * This begins by printing the line number with printLineNumber.  Then,
+ * the function uses readNextByte to read bytes until either LF (0xa),
+ * EOF, or I/O error is encountered.  Bytes before LF, EOF, or I/O error
+ * are printed with printByte.  If LF is encountered, the function
+ * prints it with printByte, prints an actual line break to output, and
+ * returns one to indicate that more lines should be printed.  If EOF is
+ * encountered, the function returns zero to indicate no further lines
+ * should be printed.  If an I/O error is encountered, the function
+ * returns -1.
+ * 
+ * This function does not report the I/O error, leaving that for the
+ * caller.
+ * 
+ * Return:
+ * 
+ *   greater than zero if more lines to read; zero if all lines have
+ *   been read; less than zero if I/O error
+ */
+static int printFullLine(void) {
+  
+  int c = 0;
+  
+  /* Print the line number */
+  printLineNumber();
+  
+  /* Print all bytes before the LF, EOF, or I/O error */
+  for(c = readNextByte(); (c >=0) && (c != 0xa); c = readNextByte()) {
+    printByte(c);
+  }
+  
+  /* If LF, print that too, followed by an actual line break */
+  if (c == 0xa) {
+    printByte(c);
+    putchar('\n');
+  }
+  
+  /* Set c to the return value depending on its current state */
+  if (c == 0xa) {
+    /* LF -- more lines to read */
+    c = 1;
+  } else if (c == -1) {
+    /* EOF -- no more lines to read */
+    c = 0;
+  } else {
+    /* I/O error */
+    c = -1;
+  }
+  
+  /* Return result */
+  return c;
+}
+
+/*
+ * Print all lines with printFullLine.
+ * 
+ * This prints the input in normal mode, passing it through the input
+ * filter chain.
+ * 
+ * The return value indicates whether printing was stopped with an EOF
+ * (successful return) or whether printing was stopped on an I/O error
+ * from input (failure return).
+ * 
+ * I/O errors are not reported by this function, leaving that for the
+ * caller.
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if I/O error
+ */
+static int printAllLines(void) {
+  int result = 0;
+  
+  /* Print lines until done or I/O error */
+  for(result = printFullLine(); result > 0; result = printFullLine());
+  
+  /* Set result of this function depending on result of last call to
+   * printFullLine */
+  if (result == 0) {
+    /* Stopped on EOF -- success */
+    result = 1;
+  } else {
+    /* Stopped on I/O error */
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -126,9 +253,6 @@ static void printByte(int c) {
  */
 int main(int argc, char *argv[]) {
   /* @@TODO: */
-  printLineNumber();
-  printByte(0x21);
-  printByte(0xa);
-  printf("\n");
+  printAllLines();
   return 0;
 }
