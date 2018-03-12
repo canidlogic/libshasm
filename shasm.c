@@ -74,6 +74,8 @@ static void shasm_iflstate_init(
     shasm_fp_input fpin,
     void *pCustom);
 static int shasm_input_read(SHASM_IFLSTATE *ps);
+static long shasm_input_count(SHASM_IFLSTATE *ps);
+static int shasm_input_get(SHASM_IFLSTATE *ps);
 
 /*
  * Properly initialize an input filter chain state structure.
@@ -146,20 +148,86 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
   }
   
   /* Check if already a final result */
-  if (final_raw == 0) {
+  if (ps->final_raw == 0) {
     /* No final result yet -- call through to raw input reader */
     result = (*(ps->fpin))(ps->pCustomIn);
     
-    /* Handle possible results */
-    /* @@TODO: */
+    /* Handle special results */
+    if (result == SHASM_INPUT_EOF) {
+      /* EOF -- store as final result */
+      ps->final_raw = SHASM_INPUT_EOF;
+      
+    } else if ((result < 0) || (result > 255)) {
+      /* SHASM_INPUT_IOERR or invalid return value -- set IOERR as
+       * result and store as final result */
+      result = SHASM_INPUT_IOERR;
+      ps->final_raw = SHASM_INPUT_IOERR;
+    }
     
   } else {
     /* Already a final result -- just return that */
-    result = final_raw;
+    result = ps->final_raw;
   }
   
-  /* @@TODO: */
+  /* Return result */
+  return result;
 }
+
+/*
+ * Get the current line number of input.
+ * 
+ * The line number starts at one and increments each time a filtered LF
+ * is read.  The line count filter handles updating the line count.  If
+ * the line count would overflow the range of a signed long, it stays at
+ * LONG_MAX.  LONG_MAX should therefore be interpreted as a line count
+ * overflow.
+ * 
+ * The line count filter happens before the pushback buffer, so
+ * unreading a line break will not unread the line number change.  This
+ * means the line count may be off by one right next to a line break.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state structure
+ * 
+ * Return:
+ * 
+ *   the line count, or LONG_MAX if line count overflow
+ */
+static long shasm_input_count(SHASM_IFLSTATE *ps) {
+  /* @@TODO: query for line count after line count filter added; for now
+   * just return a dummy value */
+  return 1;
+}
+
+/*
+ * Get the next byte of input that has been passed through the input
+ * filter chain.
+ * 
+ * The return value is either an unsigned byte value (0-255) or
+ * SHASM_INPUT_EOF if at end of input or SHASM_INPUT_IOERR if there has
+ * been an I/O error.
+ * 
+ * This is the function to use to get a byte from the input filter
+ * chain.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_get(SHASM_IFLSTATE *ps) {
+  /* @@TODO: update so that this calls through to the last filter of the
+   * filter chain -- while under development this will call through to
+   * the last filter that has been developed */
+  return shasm_input_read(ps);
+}
+
+/* @@TODO: testing functions below */
 
 /*
  * Read the next byte of input from the input filter chain.
@@ -167,28 +235,30 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
  * The return value is an unsigned byte value (0-255).  -1 is returned
  * if EOF is encountered.  -2 is returned if there was an I/O error.
  * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
  * Return:
  * 
  *   the next filtered byte from the input filter chain, or -1 for EOF,
  *   or -2 if I/O error
  */
-static int readNextByte(void) {
+static int readNextByte(SHASM_IFLSTATE *ps) {
   
   int c = 0;
   
-  /* @@TODO: replace the following call with a call to the input filter
-   * chain -- at the moment input is taken directly from standard
-   * input */
-  c = getchar();
-  if (c == EOF) {
-    /* Determine whether EOF or I/O error and set c appropriately */
-    if (ferror(stdin)) {
-      /* I/O error */
-      c = -2;
-    } else {
-      /* EOF */
-      c = -1;
-    }
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read a filtered byte of input */
+  c = shasm_input_get(ps);
+  if (c == SHASM_INPUT_EOF) {
+    c = -1;
+  } else if (c == SHASM_INPUT_IOERR) {
+    c = -2;
   }
   
   /* Return result */
@@ -204,15 +274,22 @@ static int readNextByte(void) {
  * The line number will be printed as three zero-padded digits, with
  * "???" printed if the line number is outside the range 0-999.  After
  * the digits there will be a colon followed by a space.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
  */
-static void printLineNumber(void) {
+static void printLineNumber(SHASM_IFLSTATE *ps) {
 
   long line_num = 0;
   
-  /* @@TODO: once the line number filter is written, replace this code
-   * with a call to the filter to determine the line number, converting
-   * the result to a signed long */
-  line_num = 12;
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Get the line number, or LONG_MAX if line count overflow */
+  line_num = shasm_input_count(ps);
   
   /* Check whether line number is in range */
   if ((line_num >= 0) && (line_num <= 999)) {
@@ -275,20 +352,31 @@ static void printByte(int c) {
  * This function does not report the I/O error, leaving that for the
  * caller.
  * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
  * Return:
  * 
  *   greater than zero if more lines to read; zero if all lines have
  *   been read; less than zero if I/O error
  */
-static int printFullLine(void) {
+static int printFullLine(SHASM_IFLSTATE *ps) {
   
   int c = 0;
   
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
   /* Print the line number */
-  printLineNumber();
+  printLineNumber(ps);
   
   /* Print all bytes before the LF, EOF, or I/O error */
-  for(c = readNextByte(); (c >=0) && (c != 0xa); c = readNextByte()) {
+  for(  c = readNextByte(ps);
+        (c >=0) && (c != 0xa);
+        c = readNextByte(ps)) {
     printByte(c);
   }
   
@@ -329,15 +417,26 @@ static int printFullLine(void) {
  * I/O errors are not reported by this function, leaving that for the
  * caller.
  * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
  * Return:
  * 
  *   non-zero if successful, zero if I/O error
  */
-static int printAllLines(void) {
+static int printAllLines(SHASM_IFLSTATE *ps) {
   int result = 0;
   
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
   /* Print lines until done or I/O error */
-  for(result = printFullLine(); result > 0; result = printFullLine());
+  for(  result = printFullLine(ps);
+        result > 0;
+        result = printFullLine(ps));
   
   /* Set result of this function depending on result of last call to
    * printFullLine */
@@ -351,6 +450,43 @@ static int printAllLines(void) {
   
   /* Return result */
   return result;
+}
+
+/*
+ * Implementation of the raw input callback.
+ * 
+ * Reads the next byte of input from standard input, or SHASM_INPUT_EOF
+ * for EOF, or SHASM_INPUT_IOERR for I/O error.
+ * 
+ * The custom pass-through parameter is not used.
+ * 
+ * Parameters:
+ * 
+ *   pCustom - (ignored)
+ * 
+ * Return:
+ * 
+ *   the unsigned value of the next byte of input (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int rawInput(void *pCustom) {
+  int c = 0;
+  
+  /* Ignore parameter */
+  (void) pCustom;
+  
+  /* Read next byte from standard input */
+  c = getchar();
+  if (c == EOF) {
+    if (feof(stdin)) {
+      c = SHASM_INPUT_EOF;
+    } else {
+      c = SHASM_INPUT_IOERR;
+    }
+  }
+  
+  /* Return result */
+  return c;
 }
 
 /*
@@ -412,6 +548,10 @@ int main(int argc, char *argv[]) {
   
   int status = 1;
   int doubling = 0;
+  SHASM_IFLSTATE ifs;
+  
+  /* Initialize input state structure */
+  shasm_iflstate_init(&ifs, &rawInput, NULL);
   
   /* Determine if doubling mode in effect by examining parameters */
   if (argc < 2) {
@@ -452,7 +592,7 @@ int main(int argc, char *argv[]) {
     
   } else if (status) {
     /* Normal mode -- begin by printing all lines */
-    if (!printAllLines()) {
+    if (!printAllLines(&ifs)) {
       status = 0;
       fprintf(stderr, "I/O error!\n");
     }
