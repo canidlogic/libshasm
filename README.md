@@ -41,7 +41,7 @@ Finally, the program will support a special mode where the output of the filter 
 To reach the current goal, the following steps will be taken, in the order shown below:
 
 - [x] Write the testing program with no filters yet
-- [ ] Add the UTF-8 Byte Order Mark (BOM) filter
+- [x] Add the UTF-8 Byte Order Mark (BOM) filter
 - [ ] Add the line break conversion filter
 - [ ] Add the final LF filter
 - [ ] Add the unghosting filter
