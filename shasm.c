@@ -132,6 +132,15 @@ typedef struct {
    */
   int break_buf;
   
+  /*
+   * Flag that is set when the last character read was ASCII Line Feed.
+   * 
+   * If zero, then no characters have been read or the last character
+   * read was something besides LF.  If one, then at least one character
+   * has been read and the last character read was LF.
+   */
+  int last_lf;
+  
   /* @@TODO: */
 
 } SHASM_IFLSTATE;
@@ -145,6 +154,7 @@ static int shasm_input_read(SHASM_IFLSTATE *ps);
 static void shasm_input_initbom(SHASM_IFLSTATE *ps);
 static int shasm_input_bom(SHASM_IFLSTATE *ps);
 static int shasm_input_break(SHASM_IFLSTATE *ps);
+static int shasm_input_final(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -183,6 +193,7 @@ static void shasm_iflstate_init(
   ps->final_raw = 0;
   ps->bom_init = 0;
   ps->break_buf = SHASM_INPUT_INVALID;
+  ps->last_lf = 0;
   
   /* @@TODO: make sure this function is up to date with the
    * SHASM_IFLSTATE structure */
@@ -442,6 +453,68 @@ static int shasm_input_break(SHASM_IFLSTATE *ps) {
 }
 
 /*
+ * Input filter that makes sure the input ends with an ASCII Line Feed
+ * character.
+ * 
+ * This filter is built on top of the line break conversion filter.  It
+ * passes through all input as-is until SHASM_INPUT_EOF is encountered.
+ * When EOF is encountered, if no characters have been read before it or
+ * if the previous character read is not LF, then the filter will
+ * convert the EOF to an LF.  Since the earlier shasm_input_read filter
+ * returns an infinite sequence of SHASM_INPUT_EOF characters after the
+ * first EOF, the next read will then return an EOF.
+ * 
+ * This filter makes sure that there is at least one line in the file,
+ * that every line in the file ends with LF, and that EOF occurs
+ * immediately after an EOF.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_final(SHASM_IFLSTATE *ps) {
+  
+  int c = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read the next character from the line break conversion filter */
+  c = shasm_input_break(ps);
+  
+  /* Special handling for LF and EOF; in all other cases clear the
+   * last_lf flag if it is set */
+  if (c == SHASM_ASCII_LF) {
+    /* LF -- set the last_lf flag so next time we know the previous
+     * character was an LF */
+    ps->last_lf = 1;
+    
+  } else if (c == SHASM_INPUT_EOF) {
+    /* EOF -- if the last_lf flag is clear, convert EOF to an LF and set
+     * the last_lf flag; otherwise, leave the last_lf flag set and leave
+     * the EOF as-is */
+    if (!(ps->last_lf)) {
+      c = SHASM_ASCII_LF;
+      ps->last_lf = 1;
+    }
+    
+  } else {
+    /* Neither LF nor EOF -- clear the last_lf flag */
+    ps->last_lf = 0;
+  }
+  
+  /* Return the filtered character */
+  return c;
+}
+
+/*
  * Return whether the underlying raw input begins with a UTF-8 Byte
  * Order Mark (BOM) that the input filter chain filtered out.
  * 
@@ -537,7 +610,7 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* @@TODO: update so that this calls through to the last filter of the
    * filter chain -- while under development this will call through to
    * the last filter that has been developed */
-  return shasm_input_break(ps);
+  return shasm_input_final(ps);
 }
 
 /* @@TODO: testing functions below */
