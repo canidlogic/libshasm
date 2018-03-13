@@ -14,9 +14,20 @@
 
 /*
  * Special state codes that the shasm_fp_input callback can return.
+ * 
+ * The INVALID state is used for buffers, to indicate that nothing is
+ * stored in the buffer.  It must not conflict with the other codes, but
+ * it is not acceptable to return it from the input function.
  */
-#define SHASM_INPUT_EOF   (-1)    /* End of file */
-#define SHASM_INPUT_IOERR (-2)    /* I/O error   */
+#define SHASM_INPUT_EOF     (-1  )  /* End of file */
+#define SHASM_INPUT_IOERR   (-2  )  /* I/O error   */
+#define SHASM_INPUT_INVALID (-100)  /* Not a valid return code */
+
+/*
+ * Relevant ASCII values.
+ */
+#define SHASM_ASCII_LF (0xa)    /* Line feed */
+#define SHASM_ASCII_CR (0xd)    /* Carriage return */
 
 /*
  * The three unsigned byte values for a UTF-8 Byte Order Mark (BOM).
@@ -109,6 +120,18 @@ typedef struct {
    */
   int bom_left;
   
+  /*
+   * A buffer of one return value for use by the line break conversion
+   * filter.
+   * 
+   * If this is SHASM_INPUT_INVALID (its initial value), then the buffer
+   * is empty.
+   * 
+   * Otherwise, the line break buffer should use this buffered value
+   * next time instead of calling through to the BOM filter.
+   */
+  int break_buf;
+  
   /* @@TODO: */
 
 } SHASM_IFLSTATE;
@@ -121,6 +144,7 @@ static void shasm_iflstate_init(
 static int shasm_input_read(SHASM_IFLSTATE *ps);
 static void shasm_input_initbom(SHASM_IFLSTATE *ps);
 static int shasm_input_bom(SHASM_IFLSTATE *ps);
+static int shasm_input_break(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -158,6 +182,7 @@ static void shasm_iflstate_init(
   ps->pCustomIn = pCustom;
   ps->final_raw = 0;
   ps->bom_init = 0;
+  ps->break_buf = SHASM_INPUT_INVALID;
   
   /* @@TODO: make sure this function is up to date with the
    * SHASM_IFLSTATE structure */
@@ -333,6 +358,90 @@ static int shasm_input_bom(SHASM_IFLSTATE *ps) {
 }
 
 /*
+ * The line break conversion filter.
+ * 
+ * This filter is built on top of the BOM filter.  It passes through all
+ * characters from the BOM filter, except for ASCII Carriage Return (CR)
+ * and ASCII Line Feed (LF).
+ * 
+ * When CR is encountered, the function will peek at the next character
+ * to see if it is LF.  If it is, then the CR+LF pair will be converted
+ * to an LF; otherwise, the CR will be converted to LF and the other
+ * character will be buffered in the break buffer and read next time.
+ * 
+ * When LF is encountered, the function will peek at the next character
+ * to see if it is CR.  If it is, then the LF+CR pair will be converted
+ * to an LF; otherwise, the LF will be passed through as-is and the
+ * other character will be buffered in the break buffer and read next
+ * time.
+ * 
+ * The effect of this filter is to convert CR, LF, CR+LF, and LF+CR line
+ * breaks in any mixture to LF line breaks.  In ambiguous cases, the
+ * first match that is longest is selected.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_break(SHASM_IFLSTATE *ps) {
+  
+  int c = 0;
+  int c2 = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read the next character from the buffer if the buffer is not empty;
+   * otherwise, read it from the BOM filter */
+  if (ps->break_buf != SHASM_INPUT_INVALID) {
+    /* Buffered character */
+    c = ps->break_buf;
+    ps->break_buf = SHASM_INPUT_INVALID;
+    
+  } else {
+    /* No buffered character */
+    c = shasm_input_bom(ps);
+  }
+  
+  /* Special handling for CR and LF */
+  if (c == SHASM_ASCII_CR) {
+    /* Carriage return -- read next character to check for pair */
+    c2 = shasm_input_bom(ps);
+    
+    /* If not paired CR+LF then buffer next character for next time;
+     * otherwise leave the paired LF read */
+    if (c2 != SHASM_ASCII_LF) {
+      ps->break_buf = c2;
+    }
+    
+    /* Convert break to LF */
+    c = SHASM_ASCII_LF;
+    
+  } else if (c == SHASM_ASCII_LF) {
+    /* Line feed -- read next character to check for pair */
+    c2 = shasm_input_bom(ps);
+    
+    /* If not paired LF+CR then buffer next character for next time;
+     * otherwise leave the paired CR read */
+    if (c2 != SHASM_ASCII_CR) {
+      ps->break_buf = c2;
+    }
+    
+    /* Break is already LF so no need to convert */
+  }
+  
+  /* Return the filtered character */
+  return c;
+}
+
+/*
  * Return whether the underlying raw input begins with a UTF-8 Byte
  * Order Mark (BOM) that the input filter chain filtered out.
  * 
@@ -428,7 +537,7 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* @@TODO: update so that this calls through to the last filter of the
    * filter chain -- while under development this will call through to
    * the last filter that has been developed */
-  return shasm_input_bom(ps);
+  return shasm_input_break(ps);
 }
 
 /* @@TODO: testing functions below */
