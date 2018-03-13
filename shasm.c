@@ -19,6 +19,13 @@
 #define SHASM_INPUT_IOERR (-2)    /* I/O error   */
 
 /*
+ * The three unsigned byte values for a UTF-8 Byte Order Mark (BOM).
+ */
+#define SHASM_BOM_BYTE_1 (0xef)
+#define SHASM_BOM_BYTE_2 (0xbb)
+#define SHASM_BOM_BYTE_3 (0xbf)
+
+/*
  * Function pointer type for the input reader function.
  * 
  * This is the callback that Shastina's input filter chain uses to read
@@ -65,6 +72,43 @@ typedef struct {
    */
   int final_raw;
   
+  /*
+   * Flag indicating whether the BOM buffer has been initialized yet.
+   * 
+   * If zero, then the BOM buffer has not yet been initialized.  If one,
+   * then the buffer is initialized.
+   */
+  int bom_init;
+  
+  /*
+   * The BOM buffer.
+   * 
+   * Stores the first three return values from calling the raw input
+   * function.  These may be unsigned byte values (0-255) or
+   * SHASM_INPUT_EOF or SHASM_INPUT_IOERR.
+   * 
+   * This buffer is used by the BOM filter to check for a UTF-8 Byte
+   * Order Mark (BOM) at the start of raw input.  It is only relevant if
+   * the bom_init flag is set, indicating the buffer has been
+   * initialized.
+   * 
+   * bom_left indicates the number of buffered return values that the
+   * BOM filter still needs to read from bom_buf.
+   */
+  int bom_buf[3];
+  
+  /*
+   * The number of bytes left to read in the BOM buffer.
+   * 
+   * This field is only relevant if the bom_init flag is set.  If the
+   * three buffered return values read into bom_buf match a UTF-8 Byte
+   * Order Mark (BOM), then this will be initialized to zero so that the
+   * initial BOM is skipped.  Otherwise, this will be initialized to
+   * three such that the buffered return values are returned by the BOM
+   * filter before reading further raw input.
+   */
+  int bom_left;
+  
   /* @@TODO: */
 
 } SHASM_IFLSTATE;
@@ -75,6 +119,7 @@ static void shasm_iflstate_init(
     shasm_fp_input fpin,
     void *pCustom);
 static int shasm_input_read(SHASM_IFLSTATE *ps);
+static void shasm_input_initbom(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -111,6 +156,7 @@ static void shasm_iflstate_init(
   ps->fpin = fpin;
   ps->pCustomIn = pCustom;
   ps->final_raw = 0;
+  ps->bom_init = 0;
   
   /* @@TODO: make sure this function is up to date with the
    * SHASM_IFLSTATE structure */
@@ -176,13 +222,62 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
 }
 
 /*
- * Return whether the underlying raw input began with a UTF-8 Byte Order
- * Mark (BOM) that the input filter chain filtered out.
+ * Initialize the BOM buffer if not alredy initialized.
+ * 
+ * This function only takes action if the bom_init flag is zero,
+ * indicating that the BOM buffer has not yet been initialized.  In this
+ * case, the function calls shasm_input_read three times and buffers
+ * these first three return values in bom_buf (including special EOF and
+ * IOERR returns).  If these first three return values match a UTF-8
+ * Byte Order Mark (BOM), then bom_left is set to zero so that the BOM
+ * will be skipped; else, bom_left is set to three so that the BOM
+ * filter will use the buffered return values for its first three
+ * returns.  In both cases, the bom_init flag is set to indicate that
+ * the BOM buffer is now initialized.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state structure
+ */
+static void shasm_input_initbom(SHASM_IFLSTATE *ps) {
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Only take action if not yet initialized */
+  if (!(ps->bom_init)) {
+    
+    /* Read the first three raw return values into the buffer */
+    ps->bom_buf[0] = shasm_input_read(ps);
+    ps->bom_buf[1] = shasm_input_read(ps);
+    ps->bom_buf[2] = shasm_input_read(ps);
+    
+    /* Set bom_left depending on whether we read a UTF-8 BOM */
+    if ((ps->bom_buf[0] == SHASM_BOM_BYTE_1) &&
+        (ps->bom_buf[1] == SHASM_BOM_BYTE_2) &&
+        (ps->bom_buf[2] == SHASM_BOM_BYTE_3)) {
+      /* UTF-8 BOM -- set bom_left to zero to skip it */
+      ps->bom_left = 0;
+    
+    } else {
+      /* Not a UTF-8 BOM -- set bom_left to three so the buffered values
+       * will be reread by the BOM filter */
+      ps->bom_left = 3;
+    }
+    
+    /* Set the BOM initialization flag */
+    ps->bom_init = 1;
+  }
+}
+
+/*
+ * Return whether the underlying raw input begins with a UTF-8 Byte
+ * Order Mark (BOM) that the input filter chain filtered out.
  * 
  * This can be used before any filtered bytes have been read.  In this
- * case, the function will read the first filtered byte and then unread
- * it.  The BOM filter will then be queried to see if it read a BOM at
- * the start of input.
+ * case, the function will read and buffer up to three bytes from the
+ * beginning of raw input to check for the BOM.
  * 
  * Parameters:
  * 
@@ -190,15 +285,35 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
  * 
  * Return:
  * 
- *   non-zero if a UTF-8 BOM was present at the start of raw input, zero
+ *   non-zero if a UTF-8 BOM is present at the start of raw input, zero
  *   if not
  */
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps) {
-  /* @@TODO:  finish this once the BOM filter and pushback buffer filter
-   * have been implemented -- for now just return a dummy value */
-  /* @@TODO:  after BOM filter is complete, implement a temporary
-   * version that doesn't use the pushback feature yet */
-  return 0;
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Initialize BOM buffer if necessary */
+  shasm_input_initbom(ps);
+  
+  /* Determine result depending on whether we read a UTF-8 BOM */
+  if ((ps->bom_buf[0] == SHASM_BOM_BYTE_1) &&
+      (ps->bom_buf[1] == SHASM_BOM_BYTE_2) &&
+      (ps->bom_buf[2] == SHASM_BOM_BYTE_3)) {
+    /* UTF-8 BOM -- set result to true */
+    result = 1;
+    
+  } else {
+    /* Not a UTF-8 BOM -- set result to false */
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
