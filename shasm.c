@@ -120,6 +120,7 @@ static void shasm_iflstate_init(
     void *pCustom);
 static int shasm_input_read(SHASM_IFLSTATE *ps);
 static void shasm_input_initbom(SHASM_IFLSTATE *ps);
+static int shasm_input_bom(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -222,7 +223,7 @@ static int shasm_input_read(SHASM_IFLSTATE *ps) {
 }
 
 /*
- * Initialize the BOM buffer if not alredy initialized.
+ * Initialize the BOM buffer if not already initialized.
  * 
  * This function only takes action if the bom_init flag is zero,
  * indicating that the BOM buffer has not yet been initialized.  In this
@@ -269,6 +270,66 @@ static void shasm_input_initbom(SHASM_IFLSTATE *ps) {
     /* Set the BOM initialization flag */
     ps->bom_init = 1;
   }
+}
+
+/*
+ * The UTF-8 Byte Order Mark (BOM) filter.
+ * 
+ * This filter is built on top of shasm_input_read, which reads directly
+ * from the raw input callback.
+ * 
+ * This filter first initializes the BOM buffer if not already
+ * initialized by calling shasm_input_initbom.  This has the effect of
+ * buffering the first three raw input returns in bom_buf and setting
+ * bom_left to zero if the first three returns match a UTF-8 BOM, or
+ * else setting bom_left to three.
+ * 
+ * This BOM filter will pass through all input from shasm_input_read,
+ * except when bom_left is non-zero.  In this case, the BOM filter will
+ * return a buffered return value and decrement bom_left.
+ * 
+ * The effect of this filter is to skip over the first three bytes of
+ * the file if they match a UTF-8 BOM, but otherwise pass through all
+ * raw input.  In short, a UTF-8 BOM at the start of input is filtered
+ * out if present.  shasm_input_hasbom can be used to determine whether
+ * a BOM was present at the start of input.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_bom(SHASM_IFLSTATE *ps) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Initialize BOM buffer if not already initialized */
+  shasm_input_initbom(ps);
+  
+  /* Determine whether to read from underlying filter or use a buffered
+   * result */
+  if (ps->bom_left > 0) {
+    /* Buffered result -- read it from buffer and update bom_left */
+    result = ps->bom_buf[3 - ps->bom_left];
+    (ps->bom_left)--;
+  
+  } else {
+    /* No buffered results to read -- read through from underlying
+     * filter */
+    result = shasm_input_read(ps);
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -367,7 +428,7 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* @@TODO: update so that this calls through to the last filter of the
    * filter chain -- while under development this will call through to
    * the last filter that has been developed */
-  return shasm_input_read(ps);
+  return shasm_input_bom(ps);
 }
 
 /* @@TODO: testing functions below */
