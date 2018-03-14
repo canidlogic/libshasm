@@ -68,8 +68,8 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Add the final LF filter
 - [x] Add the tab unghosting filter
 - [x] Add the line unghosting filter
-- [ ] Add the line count filter
-- [ ] Add the pushback buffer filter
+- [x] Add the line count filter
+- [x] Add the pushback buffer filter
 - [ ] Split the filters out to a separate module
 
 See the "Divergences" section of this readme for more about the tab and line unghosting filters, which are not the same as the unghosting filter described in draft 3V:C4-5 of the Shastina Specification.
