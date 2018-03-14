@@ -272,6 +272,7 @@ static int shasm_input_pushb(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
+static void shasm_input_back(SHASM_IFLSTATE *ps);
 
 /*
  * Properly initialize an input filter chain state structure.
@@ -1117,6 +1118,49 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* Call through to the last filter in the input filter chain, which is
    * the pushback buffer filter */
   return shasm_input_pushb(ps);
+}
+
+/*
+ * Backtrack by one filtered input character.
+ * 
+ * This function activates pushback mode, which means the pushback
+ * buffer filter at the end of the input filter chain will return the
+ * most recent character read next time it is called rather than reading
+ * another character from the underlying filter chain.
+ * 
+ * It is a fault to use this function when pushback mode is already
+ * active (that is, to try to backtrack more than one character).  It is
+ * also a fault to use this function if nothing has been read from the
+ * input filter chain (using shasm_input_get) yet.
+ * 
+ * However, provided that the client does not attempt to backtrack more
+ * than one character, it is possible to backtrack and reread the same
+ * character as many times as the client desires.
+ * 
+ * Note that the pushback buffer filter occurs after the line count
+ * filter in the input filter chain.  This means that backtracking does
+ * not affect the line count, which means that the line count may be off
+ * by one right next to a filtered LF.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ */
+static void shasm_input_back(SHASM_IFLSTATE *ps) {
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Verify that not already in pushback mode, and that at least one
+   * filtered character has been read */
+  if (ps->pb_active || (ps->pb_buffer == SHASM_INPUT_INVALID)) {
+    abort();
+  }
+  
+  /* Activate pushback mode */
+  ps->pb_active = 1;
 }
 
 /* @@TODO: testing functions below */
