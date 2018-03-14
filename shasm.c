@@ -16,7 +16,7 @@
  * Special state codes that the shasm_fp_input callback can return.
  * 
  * The INVALID state is used for buffers, to indicate that nothing is
- * stored in the buffer.  It must not conflict with the other codes, but
+ * stored in the buffer.  It must not conflict with the other codes, and
  * it is not acceptable to return it from the input function.
  */
 #define SHASM_INPUT_EOF     (-1  )  /* End of file */
@@ -222,7 +222,36 @@ typedef struct {
    */
   long line;
   
-  /* @@TODO: */
+  /*
+   * The pushback buffer.
+   * 
+   * This starts out with SHASM_INPUT_INVALID, to indicate that the
+   * buffer is empty.  Each character that is read from the underlying
+   * line count filter is stored in this buffer, so that the buffer has
+   * the most recent character read (or SHASM_INPUT_INVALID if no
+   * characters have been read).
+   * 
+   * If pushback mode is active (see pb_active), then the contents of
+   * the buffer should be used for the next return from the pushback
+   * buffer, rather than reading another character from the underlying
+   * line count buffer.
+   */
+  int pb_buffer;
+  
+  /*
+   * Pushback buffer active flag.
+   * 
+   * This starts out zero, indicating that pushback mode is inactive.
+   * In this case, the pushback buffer filter will read characters from
+   * the underlying line count filter, storing the most recent character
+   * in the pushback buffer pb_buffer.
+   * 
+   * Pushback buffer mode may only be activated when it is currently
+   * inactive (it is a fault if it is activated when already active),
+   * and only when at least one character has been read from input (that
+   * is, the pushback buffer is not empty).
+   */
+  int pb_active;
 
 } SHASM_IFLSTATE;
 
@@ -239,6 +268,7 @@ static int shasm_input_final(SHASM_IFLSTATE *ps);
 static int shasm_input_tabung(SHASM_IFLSTATE *ps);
 static int shasm_input_lineung(SHASM_IFLSTATE *ps);
 static int shasm_input_linec(SHASM_IFLSTATE *ps);
+static int shasm_input_pushb(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -275,18 +305,22 @@ static void shasm_iflstate_init(
   ps->fpin = fpin;
   ps->pCustomIn = pCustom;
   ps->final_raw = 0;
+  
   ps->bom_init = 0;
   ps->break_buf = SHASM_INPUT_INVALID;
   ps->last_lf = 0;
+  
   ps->tu_count = 0;
   ps->tu_buffer = SHASM_INPUT_INVALID;
+  
   ps->lu_htc = 0;
   ps->lu_spc = 0;
   ps->lu_buffer = SHASM_INPUT_INVALID;
+  
   ps->line = 1;
   
-  /* @@TODO: make sure this function is up to date with the
-   * SHASM_IFLSTATE structure */
+  ps->pb_buffer = SHASM_INPUT_INVALID;
+  ps->pb_active = 0;
 }
 
 /*
@@ -934,6 +968,55 @@ static int shasm_input_linec(SHASM_IFLSTATE *ps) {
 }
 
 /*
+ * The pushback buffer filter.
+ * 
+ * This is built on top of the line count filter.  If pushback mode is
+ * inactive, it passes through characters from the underlying line count
+ * filter, storing the most recent character in the pushback buffer.  If
+ * pushback mode is active, it returns the contents of the pushback
+ * buffer and clears pushback mode.
+ * 
+ * This filter allows backtracking by one character by using the
+ * shasm_input_back function.  See that function for further
+ * information.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_pushb(SHASM_IFLSTATE *ps) {
+  
+  int c = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Either read from underlying filter or from the pushback buffer */
+  if (ps->pb_active) {
+    /* Pushback mode active, so read from pushback buffer and clear
+     * pushback mode */
+    c = ps->pb_buffer;
+    ps->pb_active = 0;
+    
+  } else {
+    /* Pushback mode inactive, so read from underlying line count filter
+     * and store the most recent character in the pushback buffer */
+    c = shasm_input_linec(ps);
+    ps->pb_buffer = c;
+  }
+  
+  /* Return the filtered character */
+  return c;
+}
+
+/*
  * Return whether the underlying raw input begins with a UTF-8 Byte
  * Order Mark (BOM) that the input filter chain filtered out.
  * 
@@ -1031,10 +1114,9 @@ static long shasm_input_count(SHASM_IFLSTATE *ps) {
  *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
  */
 static int shasm_input_get(SHASM_IFLSTATE *ps) {
-  /* @@TODO: update so that this calls through to the last filter of the
-   * filter chain -- while under development this will call through to
-   * the last filter that has been developed */
-  return shasm_input_linec(ps);
+  /* Call through to the last filter in the input filter chain, which is
+   * the pushback buffer filter */
+  return shasm_input_pushb(ps);
 }
 
 /* @@TODO: testing functions below */
