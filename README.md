@@ -68,7 +68,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Add the final LF filter
 - [x] Add the tab unghosting filter
 - [x] Add the line unghosting filter
-- [ ] Add the line count filter
+- [x] Add the line count filter
 - [ ] Add the pushback buffer filter
 - [ ] Split the filters out to a separate module
 

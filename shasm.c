@@ -207,6 +207,21 @@ typedef struct {
    */
   int lu_buffer;
   
+  /*
+   * The line count.
+   * 
+   * This starts out at one at the beginning of input.  For each
+   * filtered LF that is read, it is incremented by one.  If it reaches
+   * LONG_MAX, it stays there, so LONG_MAX should be interpreted as an
+   * overflow.
+   * 
+   * Note that the line count filter occurs before the pushback buffer
+   * filter, so the line count is unaffected by single-character
+   * backtracking.  This means the line count could be off by one right
+   * next to a line break.
+   */
+  long line;
+  
   /* @@TODO: */
 
 } SHASM_IFLSTATE;
@@ -223,6 +238,7 @@ static int shasm_input_break(SHASM_IFLSTATE *ps);
 static int shasm_input_final(SHASM_IFLSTATE *ps);
 static int shasm_input_tabung(SHASM_IFLSTATE *ps);
 static int shasm_input_lineung(SHASM_IFLSTATE *ps);
+static int shasm_input_linec(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -267,6 +283,7 @@ static void shasm_iflstate_init(
   ps->lu_htc = 0;
   ps->lu_spc = 0;
   ps->lu_buffer = SHASM_INPUT_INVALID;
+  ps->line = 1;
   
   /* @@TODO: make sure this function is up to date with the
    * SHASM_IFLSTATE structure */
@@ -872,6 +889,51 @@ static int shasm_input_lineung(SHASM_IFLSTATE *ps) {
 }
 
 /*
+ * The line count filter.
+ * 
+ * This filter is built on top of the line unghosting filter.  It passes
+ * through everything from the line unghosting filter.  However,
+ * whenever a filtered LF is encountered, this filter will increment the
+ * line count, unless the line count has already reached LONG_MAX, in
+ * which case it is left there.
+ * 
+ * This filter therefore makes sure that the line count is updated.
+ * Note that because this filter occurs before the pushback buffer
+ * filter, the line count is unaffected by backtracking.  This means
+ * that the line count could be off by one near a line break.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_linec(SHASM_IFLSTATE *ps) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read a character from the underlying line unghosting filter */
+  result = shasm_input_lineung(ps);
+  
+  /* If an LF was read, increment line count unless line count already
+   * at LONG_MAX */
+  if ((result == SHASM_ASCII_LF) && (ps->line < LONG_MAX)) {
+    (ps->line)++;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
  * Return whether the underlying raw input begins with a UTF-8 Byte
  * Order Mark (BOM) that the input filter chain filtered out.
  * 
@@ -938,9 +1000,14 @@ static int shasm_input_hasbom(SHASM_IFLSTATE *ps) {
  *   the line count, or LONG_MAX if line count overflow
  */
 static long shasm_input_count(SHASM_IFLSTATE *ps) {
-  /* @@TODO: query for line count after line count filter added; for now
-   * just return a dummy value */
-  return 1;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Return the line count */
+  return ps->line;
 }
 
 /*
@@ -967,7 +1034,7 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* @@TODO: update so that this calls through to the last filter of the
    * filter chain -- while under development this will call through to
    * the last filter that has been developed */
-  return shasm_input_lineung(ps);
+  return shasm_input_linec(ps);
 }
 
 /* @@TODO: testing functions below */
