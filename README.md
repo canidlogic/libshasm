@@ -66,8 +66,8 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Add the UTF-8 Byte Order Mark (BOM) filter
 - [x] Add the line break conversion filter
 - [x] Add the final LF filter
-- [ ] Add the tab unghosting filter
-- [ ] Add the line unghosting filter
+- [x] Add the tab unghosting filter
+- [x] Add the line unghosting filter
 - [ ] Add the line count filter
 - [ ] Add the pushback buffer filter
 - [ ] Split the filters out to a separate module

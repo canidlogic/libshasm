@@ -26,8 +26,10 @@
 /*
  * Relevant ASCII values.
  */
+#define SHASM_ASCII_HT (0x9)    /* Horizontal tab */
 #define SHASM_ASCII_LF (0xa)    /* Line feed */
 #define SHASM_ASCII_CR (0xd)    /* Carriage return */
+#define SHASM_ASCII_SP (0x20)   /* Space */
 
 /*
  * The three unsigned byte values for a UTF-8 Byte Order Mark (BOM).
@@ -141,6 +143,70 @@ typedef struct {
    */
   int last_lf;
   
+  /*
+   * The count of space characters for the tab unghosting filter.
+   * 
+   * This starts out zero.  If this is non-zero, then a buffered
+   * sequence of space characters is present that the tab unghosting
+   * filter should read out in subsequent calls, returning space
+   * characters this many times, and then using tu_buffer before
+   * returning to reading through to the final LF filter.
+   * 
+   * If this is LONG_MAX, then the counter has overflowed.
+   */
+  long tu_count;
+  
+  /*
+   * A buffered character for the tab unghosting filter.
+   * 
+   * This starts out at SHASM_INPUT_INVALID, meaning there is nothing in
+   * the buffer.  If tu_count is non-zero, then buffered spaces from
+   * that should be read out from the tab unghosting filter before
+   * consulting this buffer.  Once the buffered space buffer and
+   * tu_buffer are both emptied, the tab unghosting filter returns to
+   * reading through from the final LF filter.
+   */
+  int tu_buffer;
+  
+  /*
+   * The count of tab characters for the line unghosting filter.
+   * 
+   * This starts out zero.  If this is non-zero, then a buffered
+   * sequence of tab characters is present that the line unghosting
+   * filter should read out in subsequent calls, returning HT characters
+   * this many times, and then using lu_spc and lu_buffer before
+   * returning to reading through to the tab unghosting filter.
+   * 
+   * If this is LONG_MAX, then the counter has overflowed.
+   */
+  long lu_htc;
+  
+  /*
+   * The count of space characters for the line unghosting filter.
+   * 
+   * This starts out zero.  If this is non-zero, then a buffered
+   * sequence of space characters is present that the line unghosting
+   * filter should read out in subsequent calls, returning SP characters
+   * this many times.  However, the line unghosting filter should empty
+   * the lu_htc count before working on lu_spc.  The line unghosting
+   * filter should then clear our lu_buffer before returning to reading
+   * through to the tab unghosting filter.
+   * 
+   * If this is LONG_MAX, then the counter has overflowed.
+   */
+  long lu_spc;
+  
+  /*
+   * A buffered character for the line unghosting filter.
+   * 
+   * This starts out at SHASM_INPUT_INVALID, meaning there is nothing in
+   * this buffer.  The line unghosting filter should clear out lu_htc
+   * and lu_spc before checking lu_buffer.  Once lu_htc, lu_spc, and
+   * lu_buffer have been cleared out, the line unghosting filter should
+   * return to reading through to the tab unghosting filter.
+   */
+  int lu_buffer;
+  
   /* @@TODO: */
 
 } SHASM_IFLSTATE;
@@ -155,6 +221,8 @@ static void shasm_input_initbom(SHASM_IFLSTATE *ps);
 static int shasm_input_bom(SHASM_IFLSTATE *ps);
 static int shasm_input_break(SHASM_IFLSTATE *ps);
 static int shasm_input_final(SHASM_IFLSTATE *ps);
+static int shasm_input_tabung(SHASM_IFLSTATE *ps);
+static int shasm_input_lineung(SHASM_IFLSTATE *ps);
 static int shasm_input_hasbom(SHASM_IFLSTATE *ps);
 static long shasm_input_count(SHASM_IFLSTATE *ps);
 static int shasm_input_get(SHASM_IFLSTATE *ps);
@@ -194,6 +262,11 @@ static void shasm_iflstate_init(
   ps->bom_init = 0;
   ps->break_buf = SHASM_INPUT_INVALID;
   ps->last_lf = 0;
+  ps->tu_count = 0;
+  ps->tu_buffer = SHASM_INPUT_INVALID;
+  ps->lu_htc = 0;
+  ps->lu_spc = 0;
+  ps->lu_buffer = SHASM_INPUT_INVALID;
   
   /* @@TODO: make sure this function is up to date with the
    * SHASM_IFLSTATE structure */
@@ -515,6 +588,290 @@ static int shasm_input_final(SHASM_IFLSTATE *ps) {
 }
 
 /*
+ * The tab unghosting filter.
+ * 
+ * This filter is built on top of the final LF filter.  It discards
+ * sequences of one or more ASCII Space (SP) characters that occur
+ * immediately before an ASCII Horizontal Tab (HT).
+ * 
+ * If a sequence of SP characters is long enough to overflow the
+ * filter's count of SP characters, then this filter will return
+ * SHASM_INPUT_IOERR and continue to return I/O errors for all
+ * subsequent calls.  However, this can only happen if there are
+ * literally billions of SP characters in a row, so this should be a
+ * rare case in practice.
+ * 
+ * As a result of this filter, all sequences of whitespace consisting
+ * of SP and HT characters will consist of a sequence of zero or more
+ * HT characters followed by a sequence of zero or more SP characters.
+ * 
+ * Note that this filter can change the alignment of text from the
+ * unfiltered input if mixtures of SP and HT characters were used
+ * haphazardly to align text.  To avoid this problem, never use SP
+ * immediately before HT, or convert all HT characters to sequences of
+ * SP characters before passing as input to this filter chain.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_tabung(SHASM_IFLSTATE *ps) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Determine whether to read a buffered space, an I/O error due to
+   * overflow, a buffered character, or to read a new character from the
+   * underlying final LF filter */
+  if ((ps->tu_count > 0) && (ps->tu_count < LONG_MAX)) {
+    /* Read a buffered space */
+    result = SHASM_ASCII_SP;
+    (ps->tu_count)--;
+    
+  } else if (ps->tu_count == LONG_MAX) {
+    /* SP counter overflow, so read an I/O error */
+    result = SHASM_INPUT_IOERR;
+    
+  } else if (ps->tu_buffer != SHASM_INPUT_INVALID) {
+    /* No buffered spaces, but a buffered character, so use that */
+    result = ps->tu_buffer;
+    ps->tu_buffer = SHASM_INPUT_INVALID;
+  
+  } else {
+    /* Nothing in tab unghosting buffers, so read from underlying final
+     * LF filter */
+    result = shasm_input_final(ps);
+    
+    /* Special processing required if we read a SP character; else, just
+     * proceed */
+    if (result == SHASM_ASCII_SP) {
+      /* We just read a SP character -- count how many SP characters
+       * occur after this one in tu_count, and buffer the return value
+       * that ended the sequence of SP characters in tu_buffer; in case
+       * of SP character count overflow, set the count to LONG_MAX and
+       * don't bother reading further in input */
+      ps->tu_count = 0;
+      for(result = shasm_input_final(ps);
+          result == SHASM_ASCII_SP;
+          result = shasm_input_final(ps)) {
+        /* Increment SP count; in case of overflow set count to LONG_MAX
+         * and break out of loop */
+        if (ps->tu_count < (LONG_MAX - 1)) {
+          (ps->tu_count)++;
+        } else {
+          ps->tu_count = LONG_MAX;
+          break;
+        }
+      }
+      
+      /* Buffer the non-SP character that was read in tu_buffer, except
+       * if the SP counter overflowed, in which case clear buffer */
+      if (ps->tu_count < LONG_MAX) {
+        ps->tu_buffer = result;
+      } else {
+        ps->tu_buffer = SHASM_INPUT_INVALID;
+      }
+      
+      /* tu_count now counts how many SP characters occur after the
+       * initial one, or it is LONG_MAX in case of overflow; tu_buffer
+       * has the return value that ended the sequence of SP characters,
+       * or it is SHASM_INPUT_INVALID in case of overflow -- if
+       * overflow, return I/O error; else, if tu_buffer is not HT,
+       * return SP; else, if tu_buffer is HT, clear the buffers and
+       * return HT */
+      if (ps->tu_count == LONG_MAX) {
+        /* Overflow */
+        result = SHASM_INPUT_IOERR;
+      
+      } else if (ps->tu_buffer == SHASM_ASCII_HT) {
+        /* HT was the last character read, so discard the SP sequence
+         * by clearing the buffers and return the HT */
+        ps->tu_count = 0;
+        ps->tu_buffer = SHASM_INPUT_INVALID;
+        result = SHASM_ASCII_HT;
+      
+      } else {
+        /* Something other than HT ended the sequence of SP characters,
+         * so leave the buffers as-is and return the initial SP that was
+         * read */
+        result = SHASM_ASCII_SP;
+      }
+    }
+  }
+  
+  /* Return the filtered character */
+  return result;
+}
+
+/*
+ * The line unghosting filter.
+ * 
+ * This filter is built on top of the tab unghosting filter.  It
+ * discards whitespace sequences consisting of ASCII Space (SP) and
+ * ASCII Horizontal Tab (HT) that occur immediately before an ASCII Line
+ * Feed (LF).
+ * 
+ * This filter assumes that in whitespace sequences, any HT characters
+ * occur before any SP characters.  The tab unghosting filter should
+ * guarantee this condition.  A fault occurs if SP occurs immediately
+ * before HT anywhere in input.
+ * 
+ * The effect of this filter is to remove invisible whitespace at the
+ * ends of lines.
+ * 
+ * If a sequence of SP or HT characters is long enough to overflow the
+ * filter's counters, then this filter will return SHASM_INPUT_IOERR and
+ * continue to return I/O errors for all subsequent calls.  However,
+ * this can only happen if there are literally billions of SP or HT
+ * characters in a row, so this should be a rare case in practice.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter state
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value of the next filtered byte (0-255), or
+ *   SHASM_INPUT_EOF, or SHASM_INPUT_IOERR
+ */
+static int shasm_input_lineung(SHASM_IFLSTATE *ps) {
+  
+  int result = 0;
+  int c = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Determine whether to read a buffered HT, a buffer SP, an I/O error
+   * due to overflow, a buffered character, or a new character from the
+   * underlying tab unghosting filter */
+  if ((ps->lu_htc == LONG_MAX) || (ps->lu_spc == LONG_MAX)) {
+    /* I/O error due to counter overflow */
+    result = SHASM_INPUT_IOERR;
+    
+  } else if (ps->lu_htc > 0) {
+    /* Read a buffered tab */
+    result = SHASM_ASCII_HT;
+    (ps->lu_htc)--;
+    
+  } else if (ps->lu_spc > 0) {
+    /* Read a buffered space */
+    result = SHASM_ASCII_SP;
+    (ps->lu_spc)--;
+    
+  } else if (ps->lu_buffer != SHASM_INPUT_INVALID) {
+    /* Read a buffered character */
+    result = ps->lu_buffer;
+    ps->lu_buffer = SHASM_INPUT_INVALID;
+    
+  } else {
+    /* Buffers are clear and no overflow error, so read a character from
+     * the underlying tab unghosting filter */
+    result = shasm_input_tabung(ps);
+    
+    /* Special handling required for SP and HT characters; otherwise,
+     * just pass through the result from the underlying tab unghosting
+     * filter */
+    if ((result == SHASM_ASCII_HT) || (result == SHASM_ASCII_SP)) {
+      /* We just read a SP or HT character into result -- count how many
+       * SP and HT characters occur after it in lu_htc and lu_spc,
+       * record the return value that ended the whitespace sequence in
+       * lu_buffer, or set both counters to LONG_MAX and stop reading in
+       * case of overflow; leave result alone for now */
+      ps->lu_htc = 0;
+      ps->lu_spc = 0;
+      for(c = shasm_input_tabung(ps);
+          (c == SHASM_ASCII_HT) || (c == SHASM_ASCII_SP);
+          c = shasm_input_tabung(ps)) {
+        
+        /* If HT read, fault if the SP count is non-zero or if the first
+         * character read (result) was SP, because HT is never supposed
+         * to occur immediately after SP in the input to this filter */
+        if ((c == SHASM_ASCII_HT) &&
+              ((ps->lu_spc > 0) || (result == SHASM_ASCII_SP))) {
+          abort();
+        }
+        
+        /* Update the appropriate counter, setting both to LONG_MAX if
+         * there is an overflow */
+        if (c == SHASM_ASCII_HT) {
+          /* Update HT count, watching for overflow */
+          if (ps->lu_htc < (LONG_MAX - 1)) {
+            (ps->lu_htc)++;
+          } else {
+            ps->lu_htc = LONG_MAX;
+            ps->lu_spc = LONG_MAX;
+          }
+          
+        } else if (c == SHASM_ASCII_SP) {
+          /* Update SP count, watching for overflow */
+          if (ps->lu_spc < (LONG_MAX - 1)) {
+            (ps->lu_spc)++;
+          } else {
+            ps->lu_htc = LONG_MAX;
+            ps->lu_spc = LONG_MAX;
+          }
+          
+        } else {
+          /* Something other than SP or HT -- shouldn't happen */
+          abort();
+        }
+        
+        /* Break out of loop if overflow occurred */
+        if ((ps->lu_htc == LONG_MAX) || (ps->lu_spc == LONG_MAX)) {
+          break;
+        }
+      }
+      
+      /* Buffer the non-SP non-HT character that was read in lu_buffer,
+       * except if one of the counters overflowed, clear the buffer */
+      if ((ps->lu_htc < LONG_MAX) && (ps->lu_spc < LONG_MAX)) {
+        ps->lu_buffer = c;
+      } else {
+        ps->lu_buffer = SHASM_INPUT_INVALID;
+      }
+    
+      /* lu_htc now counts the HT characters after the initial
+       * whitespace character or is LONG_MAX if overflow; lu_spc counts
+       * the SP characters after the initial whitespace character or it
+       * is LONG_MAX if overflow; lu_buffer has the input return that
+       * ended the whitespace sequence or it is SHASM_INPUT_INVALID if
+       * overflow; result has the initial whitespace character -- if
+       * overflow, return I/O error; else, if lu_buffer has an LF then
+       * clear the counters and buffer and return the LF; else, leave
+       * result as the first whitespace character and leave the counters
+       * and buffer as-is */
+      if ((ps->lu_htc == LONG_MAX) || (ps->lu_spc == LONG_MAX)) {
+        /* Overflow, so return I/O error */
+        result = SHASM_INPUT_IOERR;
+      
+      } else if (ps->lu_buffer == SHASM_ASCII_LF) {
+        /* LF ended the sequence, so discard whitespace sequence by
+         * clearing counters and buffer and returning the LF */
+        ps->lu_htc = 0;
+        ps->lu_spc = 0;
+        ps->lu_buffer = SHASM_INPUT_INVALID;
+        result = SHASM_ASCII_LF;
+      }
+    }
+  }
+  
+  /* Return the filtered character */
+  return result;
+}
+
+/*
  * Return whether the underlying raw input begins with a UTF-8 Byte
  * Order Mark (BOM) that the input filter chain filtered out.
  * 
@@ -610,7 +967,7 @@ static int shasm_input_get(SHASM_IFLSTATE *ps) {
   /* @@TODO: update so that this calls through to the last filter of the
    * filter chain -- while under development this will call through to
    * the last filter that has been developed */
-  return shasm_input_final(ps);
+  return shasm_input_lineung(ps);
 }
 
 /* @@TODO: testing functions below */
