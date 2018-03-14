@@ -1438,8 +1438,9 @@ static int rawInput(void *pCustom) {
  * 
  * In normal mode, the program reads from standard input, passes it
  * through a sequence of input filters matching section 3 of the 3V:C4-5
- * draft of the Shastina Specification, and writes the filtered results
- * to standard output.
+ * draft of the Shastina Specification (except for the unghosting filter
+ * divergence noted in the README), and writes the filtered results to
+ * standard output.
  * 
  * Additionally, the filtered results will be passed through some
  * additional output filters in normal mode:
@@ -1484,6 +1485,8 @@ int main(int argc, char *argv[]) {
   int status = 1;
   int doubling = 0;
   long lcount = 0;
+  int c = 0;
+  int pb = 0;
   SHASM_IFLSTATE ifs;
   
   /* Initialize input state structure */
@@ -1521,10 +1524,33 @@ int main(int argc, char *argv[]) {
   
   /* Run program depending on whether doubling mode is selected */
   if (status && doubling) {
-    /* Doubling mode */
-    /* @@TODO: write this once pushback filter has been implemented */
-    status = 0;
-    fprintf(stderr, "Doubling mode not yet implemented!\n");
+    /* Doubling mode -- echo all characters, except double
+     * non-whitespace US-ASCII printing characters by using the pushback
+     * feature */
+    pb = 0;
+    for(c = shasm_input_get(&ifs);
+        (c != SHASM_INPUT_EOF) && (c != SHASM_INPUT_IOERR);
+        c = shasm_input_get(&ifs)) {
+      /* Echo current character */
+      putchar(c);
+      
+      /* If current character in doubling range and pb flag is clear,
+       * activate pushback mode to reread the character and set the pb
+       * flag; if pb flag is set, then clear it without activating
+       * pushback mode */
+      if ((c >= 0x21) && (c <= 0x7e) && (!pb)) {
+        shasm_input_back(&ifs);
+        pb = 1;
+      } else {
+        pb = 0;
+      }
+    }
+    
+    /* Detect any I/O error */
+    if (c == SHASM_INPUT_IOERR) {
+      status = 0;
+      fprintf(stderr, "I/O error!\n");
+    }
     
   } else if (status) {
     /* Normal mode -- begin by printing all lines */
