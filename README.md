@@ -33,7 +33,7 @@ With the caveat that the tab unghosting filter may change the alignment of text 
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
-- [ ] Input filtering chain (section 3)
+- [x] Input filtering chain (section 3)
 - [ ] Tokenization function (section 4)
 - [ ] Normal string encoding (section 5.2)
 - [ ] Normal string decoding (section 5.1)
