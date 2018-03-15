@@ -4,7 +4,7 @@ libshasm (pronounced "lib sha-ZAM") is a library that implements a Shastina lang
 
 For a specification of the Shastina language, see the [Canidtech website](https://www.canidtech.com/).  See the "Divergences" section below in this readme for differences between Shastina as described in the specification and Shastina as implemented in libshasm.
 
-As of March 2018, this library is currently in the earliest stages of development and nowhere near functional yet.  This readme describes the current state of the project.
+As of March 15, 2018, the input filter chain has been completed.  This readme describes the current state of the project.
 
 Development work on this library is being handled by Noah Johnson (canidlogic on GitHub).  He can be reached by email at noah.johnson@loupmail.com
 
@@ -33,7 +33,7 @@ With the caveat that the tab unghosting filter may change the alignment of text 
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
-- [ ] Input filtering chain (section 3)
+- [x] Input filtering chain (section 3)
 - [ ] Tokenization function (section 4)
 - [ ] Normal string encoding (section 5.2)
 - [ ] Normal string decoding (section 5.1)
@@ -70,8 +70,14 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Add the line unghosting filter
 - [x] Add the line count filter
 - [x] Add the pushback buffer filter
-- [ ] Split the filters out to a separate module
+- [x] Split the filters out to a separate module
 
 See the "Divergences" section of this readme for more about the tab and line unghosting filters, which are not the same as the unghosting filter described in draft 3V:C4-5 of the Shastina Specification.
 
 Each of these steps will be performed in a separate branch, with results merged back into master when complete.  At the end of this process, the input filtering chain module will be complete, and work will proceed to the next stage in the roadmap.
+
+## 5. Releases
+
+### 0.1.0 (alpha)
+
+Completed the input filter chain (shasm_input) and developed a test program (test_input) for testing the input filter chain.
