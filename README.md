@@ -49,32 +49,31 @@ The current development roadmap is as follows.  Section references are to the Sh
 Tasks will be completed in the order shown above.  This roadmap may be revised along the way.
 
 ## 4. Current goal
-The current goal is the first stage of the roadmap, which is to complete the input filtering chain described in section 3 of the Shastina language specification (draft 3V:C4-5).
+The current goal is the second stage of the roadmap, which is to complete the tokenization function.  However, this stage of the roadmap will also lay the groundwork for the next few stages (up to and including base-85 special mode).
 
-In order to complete and test this goal, a simple program will be written that reads from standard input, passes standard input through the sequence of input filters described in the specification, and writes the filtered results to standard output.
+Whereas the first stage of the roadmap considered the input as a sequence of characters and performed character-based filtering operations, the next stages of the roadmap consider the input as a sequence of blocks.  The purpose of these stages is to transform the filtered character input into blocks.
 
-In order to allow the program to be used for testing the filter chain, the output will make whitespace and control characters (such as space, line break, and horizontal tab) visible as text representations of the characters.
+A block is defined here as a string of bytes with a length between zero bytes (empty) and 65,535 bytes.  A block reader module (shasm_block) will be defined that can read blocks from the filtered input stream of characters.  The block reader will support reading tokens, normal string data, base-16 string data, and base-85 string data.  Each of these reading operations will have its own function in the block reader.  However, the block output of each of these reading operations will use the same buffer within the block reader.
 
-Additionally, the program will display at the start of each line the line number, as tracked by the line count filter.  At the end of the output, the program will report the line number at the end of input, as well as whether a UTF-8 Byte Order Mark (BOM) was filtered out at the beginning of input.
+The goal of the second stage of the roadmap is therefore not only to complete the tokenization function, but also to define the block reader module.  Once the block reader module is defined, the next few roadmap stages will simply add additional reader functions to the block reader module to support string data.
 
-Finally, the program will support a special mode where the output of the filter chain will be echoed to standard output as-is, except each non-whitespace US-ASCII character will be doubled by using the pushback buffer to backtrack by one character for each non-whitespace US-ASCII character.
+The second stage of the roadmap will also define a testing module (test_block) that is able to test each of the block reading functions.  The next roadmap stages can therefore make use of test_block without having to define their own testing modules.
+
+The block testing module is a program that reads from standard input using the block reader module and reports on standard output the blocks that have been read.  A command-line parameter chooses what kind of blocks the block reader module will read from input.  For this roadmap stage, there will only be a "token" mode, which uses the token reader to read one or more token blocks from input, ending when the "|;" block is encountered.  (Note that this not able to parse full Shastina files, because it lacks string data reading functionality.)  Subsequent roadmap stages will add their own modes to the block testing module.
+
+Once the second roadmap stage has been completed, an alpha 0.2.0 release will be made.  The subsequent block reading roadmap stages will be handled as patch releases (0.2.1, 0.2.2, etc.) such that at the end of the 0.2.x alpha series, the block reading layer of shasm will be complete.
 
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [x] Write the testing program with no filters yet
-- [x] Add the UTF-8 Byte Order Mark (BOM) filter
-- [x] Add the line break conversion filter
-- [x] Add the final LF filter
-- [x] Add the tab unghosting filter
-- [x] Add the line unghosting filter
-- [x] Add the line count filter
-- [x] Add the pushback buffer filter
-- [x] Split the filters out to a separate module
+- [ ] Define the shasm_block interface in a header
+- [ ] Define the test_block testing module
+- [ ] Implement the buffer functions of the block reader
+- [ ] Implement the token function of the block reader
 
-See the "Divergences" section of this readme for more about the tab and line unghosting filters, which are not the same as the unghosting filter described in draft 3V:C4-5 of the Shastina Specification.
+The block interface and testing module will be limited to just the token function for now.  The string data functions will be added in subsequent roadmap steps.
 
-Each of these steps will be performed in a separate branch, with results merged back into master when complete.  At the end of this process, the input filtering chain module will be complete, and work will proceed to the next stage in the roadmap.
+These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
 ## 5. Releases
 
