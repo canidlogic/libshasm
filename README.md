@@ -66,7 +66,7 @@ Once the second roadmap stage has been completed, an alpha 0.2.0 release will be
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [ ] Define the shasm_block interface in a header
+- [x] Define the shasm_block interface in a header
 - [ ] Define the test_block testing module
 - [ ] Implement the buffer functions of the block reader
 - [ ] Implement the token function of the block reader
