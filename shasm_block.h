@@ -11,9 +11,7 @@
  * 
  * For multithreaded applications, this module is safe to use, provided
  * that each SHASM_BLOCK instance is only used from one thread at a 
- * time, and provided that the raw input callback used by the provided
- * SHASM_IFLSTATE is safe to call from multiple threads (but only from
- * one thread at a time).
+ * time.
  */
 
 #include "shasm_error.h"
@@ -36,34 +34,21 @@ struct SHASM_BLOCK_TAG;
 typedef struct SHASM_BLOCK_TAG SHASM_BLOCK;
 
 /*
- * Allocate a block reader linked to the provided input filter chain.
- * 
- * The provided input filter chain must not be freed while a block
- * reader is linked to it, or undefined behavior occurs.  The block
- * reader will not free the filter chain, so the client must free the
- * filter chain after the block reader has been freed.
+ * Allocate a block reader.
  * 
  * The returned block reader should eventually be freed with
  * shasm_block_free.
- * 
- * Parameters:
- * 
- *   ps - the input filter chain to link to this block reader
  * 
  * Return:
  * 
  *   a new block reader
  */
-SHASM_BLOCK *shasm_block_alloc(SHASM_IFLSTATE *ps);
+SHASM_BLOCK *shasm_block_alloc(void);
 
 /*
  * Free a block reader.
  * 
  * If NULL is passed, this call is ignored.
- * 
- * Note that the input filter chain linked to the block reader is not
- * freed by this function.  The client must free that separately after
- * calling this function to free the block reader.
  * 
  * Parameters:
  * 
@@ -181,5 +166,73 @@ unsigned char *shasm_block_ptr(SHASM_BLOCK *pb, int null_term);
  *   the line number or LONG_MAX
  */
 long shasm_block_line(SHASM_BLOCK *pb);
+
+/*
+ * Read a token from the provided input filter chain into the block
+ * reader's internal buffer.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called (see shasm_block_status), then this function fails
+ * immediately without performing any operation.
+ * 
+ * The provided input filter chain may be in pushback mode when passed
+ * to this function.
+ * 
+ * This function begins by reading zero or more bytes of whitespace and
+ * comments from input.  Whitespace is defined as filtered ASCII
+ * characters Space (SP), Horizontal Tab (HT), and Line Feed (LF).
+ * (Carriage Return CR characters are filtered out by the input filter
+ * chain.)  Comments begin with an ASCII ampersand and proceed up to and
+ * including the next LF.
+ * 
+ * After the function has skipped over whitespace and comments, the
+ * function clears the block reader's internal buffer and sets the line
+ * number to the line number from the input filter chain at the first
+ * character of the token.
+ * 
+ * The function then reads one or more token characters into the block
+ * reader's buffer.  The following rules are used:
+ * 
+ * (1) If the first character is one of ( ) [ ] , % ; " ' { then the
+ * token consists of just that character.
+ * 
+ * (2) |; is a complete token, regardless of what follows the semicolon.
+ * 
+ * (3) If neither (1) nor (2) apply, then read bytes until a stop
+ * character is encountered (see below for a definition).  Inclusive
+ * stop characters are included as part of the token, while exclusive
+ * stop characters are not included in the token.  Only non-whitespace,
+ * printing US-ASCII characters (0x21 - 0x7e) are allowed within tokens.
+ * 
+ * Exclusive stop characters are:  HT SP LF ( ) [ ] , % ; #
+ * Inclusive stop characters are:  "  '  {
+ * 
+ * If the operation is successful, then the input filter chain will be
+ * positioned to read the byte immediately after the last byte of the
+ * token that was just read.  (It may be in pushback mode.)  The block
+ * reader's buffer will contain the token, which may always be treated
+ * as a null-terminated string since null bytes aren't allowed within
+ * tokens.  The line number of the most recent block will be set to the
+ * line number of the input reader at the first character of the token.
+ * 
+ * The operation may fail for the following reasons:
+ * 
+ * (1) If the block reader was already in an error state when this
+ * function is called, the function fails without changing the error
+ * state.
+ * 
+ * (2) If there is an I/O error, SHASM_ERR_IO.
+ * 
+ * (3) If EOF is encountered, SHASM_ERR_EOF.
+ * 
+ * (4) If the token is longer than 65,535 bytes, SHASM_ERR_HUGEBLOCK.
+ * 
+ * (5) If a filtered character that is not in US-ASCII printing range
+ * (0x21-0x7e) and not HT SP or LF is encountered, SHASM_ERR_TOKENCHAR,
+ * except if this character occurs within a comment, in which case it is
+ * skipped over.
+ 
+ */
+int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
 
 #endif
