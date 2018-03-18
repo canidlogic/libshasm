@@ -231,7 +231,16 @@ long shasm_block_line(SHASM_BLOCK *pb);
  * (0x21-0x7e) and not HT SP or LF is encountered, SHASM_ERR_TOKENCHAR,
  * except if this character occurs within a comment, in which case it is
  * skipped over.
- 
+ *
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   ps - the input filter chain to read from
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if error
  */
 int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
 
