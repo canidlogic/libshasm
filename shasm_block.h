@@ -182,42 +182,4 @@ unsigned char *shasm_block_ptr(SHASM_BLOCK *pb, int null_term);
  */
 long shasm_block_line(SHASM_BLOCK *pb);
 
-/*
- * Clear the block reader's internal buffer to an empty string.
- * 
- * This does not reset the error status of the block reader (see
- * shasm_block_status).
- * 
- * Parameters:
- * 
- *   pb - the block reader to clear
- */
-void shasm_block_clear(SHASM_BLOCK *pb);
-
-/*
- * Append an unsigned byte value (0-255) to the end of the block
- * reader's internal buffer.
- * 
- * This might cause the buffer to be reallocated, so pointers returned
- * by shasm_block_ptr become invalid after calling this function.
- * 
- * This function will fail if the buffer already has SHASM_BLOCK_MAXSTR
- * bytes in it.  In this case, the internal buffer will be cleared and
- * the block reader will be set to error SHASM_ERR_HUGEBLOCK.
- * 
- * If this function is called when the block reader is already in an
- * error state, the function fails and does nothing further.
- * 
- * Parameters:
- * 
- *   pb - the block reader to append a byte to
- * 
- *   c - the unsigned byte value to append (0-255)
- * 
- * Return:
- * 
- *   non-zero if successful, zero if failure
- */
-int shasm_block_addByte(SHASM_BLOCK *pb, int c);
-
 #endif
