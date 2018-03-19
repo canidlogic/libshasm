@@ -9,6 +9,15 @@
  * This module converts a filtered stream of characters from shasm_input
  * into strings of zero to 65,535 bytes.
  * 
+ * On platforms where sizeof(size_t) is two bytes, this module will
+ * limit the total string size to 65,534 bytes so that the buffer
+ * capacity never goes beyond 65,535 bytes (the maximum unsigned 16-bit
+ * value), which includes space for the terminating null.  A fault will
+ * occur if this module is invoked on platforms where sizeof(size_t) is
+ * less than two bytes.  On 16-bit platforms, see in the implementation
+ * file the SHASM_BLOCK_MAXBUFFER constant, which may need to be
+ * adjusted to prevent memory faults.
+ * 
  * For multithreaded applications, this module is safe to use, provided
  * that each SHASM_BLOCK instance is only used from one thread at a 
  * time.
