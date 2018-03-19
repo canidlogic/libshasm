@@ -140,7 +140,6 @@ struct SHASM_BLOCK_TAG {
 static long shasm_block_adjcap(long v);
 
 static void shasm_block_clear(SHASM_BLOCK *pb);
-static void shasm_block_setLine(SHASM_BLOCK *pb, long line);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
 
 /*
@@ -194,8 +193,6 @@ static long shasm_block_adjcap(long v) {
   return v;
 }
 
-/* @@TODO: finish the local functions given below */
-
 /*
  * Clear the block reader's internal buffer to an empty string.
  * 
@@ -206,29 +203,19 @@ static long shasm_block_adjcap(long v) {
  * 
  *   pb - the block reader to clear
  */
-static void shasm_block_clear(SHASM_BLOCK *pb);
-
-/*
- * Set the input line number associated with the block that has just
- * been read into the buffer.
- * 
- * The provided line number must be in range one up to LONG_MAX, with
- * LONG_MAX being a special value indicating that the line number has
- * overflowed.
- * 
- * If the block reader is in an error state (see shasm_block_status),
- * then the line number of the most recent block will be frozen at
- * LONG_MAX, and calls to this function will be ignored.  The line
- * number of the error that stopped the block reader is handled
- * separately.
- * 
- * Parameters:
- * 
- *   pb - the block reader
- * 
- *   line - the line number to set
- */
-static void shasm_block_setLine(SHASM_BLOCK *pb, long line);
+static void shasm_block_clear(SHASM_BLOCK *pb) {
+  /* Check parameter */
+  if (pb == NULL) {
+    abort();
+  }
+  
+  /* Reset buf_len and null_present */
+  pb->buf_len = 0;
+  pb->null_present = 0;
+  
+  /* Clear the buffer to all zero */
+  memset(pb->pBuf, 0, (size_t) pb->buf_cap);
+}
 
 /*
  * Append an unsigned byte value (0-255) to the end of the block
@@ -255,6 +242,7 @@ static void shasm_block_setLine(SHASM_BLOCK *pb, long line);
  *   non-zero if successful, zero if failure
  */
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
+/* @@TODO: */
 
 /*
  * Public functions
@@ -334,4 +322,83 @@ int shasm_block_status(SHASM_BLOCK *pb, long *pLine) {
   return pb->code;
 }
 
-/* @@TODO: */
+/*
+ * shasm_block_count function.
+ */
+long shasm_block_count(SHASM_BLOCK *pb) {
+  long result = 0;
+  
+  /* Check parameter */
+  if (pb == NULL) {
+    abort();
+  }
+  
+  /* Use the count field or a value of zero, depending on error state */
+  if (pb->code == SHASM_OKAY) {
+    /* Not in error state -- use length field of structure */
+    result = pb->buf_len;
+  } else {
+    /* Error state -- use value of zero */
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * shasm_block_ptr function.
+ */
+unsigned char *shasm_block_ptr(SHASM_BLOCK *pb, int null_term) {
+  unsigned char *pc = NULL;
+  
+  /* Check parameter */
+  if (pb == NULL) {
+    abort();
+  }
+  
+  /* Get pointer to buffer */
+  pc = pb->pBuf;
+  
+  /* Special handling for a few cases */
+  if (pb->code != SHASM_OKAY) {
+    /* Error state -- write a terminating null into the start of the
+     * buffer to make sure there's an empty string */
+    *pc = (unsigned char) 0;
+  
+  } else if (null_term) {
+    /* Client expecting null-terminated string -- clear pc to NULL if
+     * null is present in the data */
+    if (pb->null_present) {
+      pc = NULL;
+    }
+  }
+  
+  /* Return the buffer pointer */
+  return pc;
+}
+
+/*
+ * shasm_block_line function.
+ */
+long shasm_block_line(SHASM_BLOCK *pb) {
+  long result = 0;
+  
+  /* Check parameter */
+  if (pb == NULL) {
+    abort();
+  }
+  
+  /* Determine result depending on error state */
+  if (pb->code == SHASM_OKAY) {
+    /* Not in error state -- return line field */
+    result = pb->line;
+  
+  } else {
+    /* In error state -- return LONG_MAX */
+    result = LONG_MAX;
+  }
+  
+  /* Return result */
+  return result;
+}

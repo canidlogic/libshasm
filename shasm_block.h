@@ -130,8 +130,8 @@ long shasm_block_count(SHASM_BLOCK *pb);
  * The client should not modify it or try to free it.  The pointer is
  * valid until another reading function is called or the block reader is
  * freed (whichever occurs first).  The client should call this function
- * again after each call to the reading function, in case the block
- * reader has reallocated the buffer.
+ * again after each call to a reading function, in case the block reader
+ * has reallocated the buffer.
  * 
  * If the length of the data is zero, then the returned pointer will
  * point to a string consisting solely of a null termination byte.

@@ -31,6 +31,10 @@
  * 
  * This indicates that a token or string data that decodes to a string
  * longer than 65,535 bytes was encountered in the input file.
+ * 
+ * On platforms with a size_t type less than 32-bit, the length limit is
+ * 65,534 bytes (or less, if the SHASM_BLOCK_MAXBUFFER constant has been
+ * adjusted in the block reader implementation).
  */
 #define SHASM_ERR_HUGEBLOCK (3)
 
