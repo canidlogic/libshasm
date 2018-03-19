@@ -6,16 +6,9 @@
  * See the header for further information.
  */
 #include "shasm_input.h"
+#include "shasm_ascii.h"
 #include <stdlib.h>
 #include <string.h>
-
-/*
- * Relevant ASCII values.
- */
-#define SHASM_ASCII_HT (0x9)    /* Horizontal tab */
-#define SHASM_ASCII_LF (0xa)    /* Line feed */
-#define SHASM_ASCII_CR (0xd)    /* Carriage return */
-#define SHASM_ASCII_SP (0x20)   /* Space */
 
 /*
  * The three unsigned byte values for a UTF-8 Byte Order Mark (BOM).

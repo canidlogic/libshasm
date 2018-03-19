@@ -6,6 +6,7 @@
  * See the header for further information.
  */
 #include "shasm_block.h"
+#include "shasm_ascii.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,9 +134,81 @@ struct SHASM_BLOCK_TAG {
  * ===============
  */
 
+static void shasm_block_seterr(
+    SHASM_BLOCK *pb,
+    SHASM_IFLSTATE *ps,
+    int code);
+static void shasm_block_setbigerr(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
 static long shasm_block_adjcap(long v);
 static void shasm_block_clear(SHASM_BLOCK *pb);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
+
+/*
+ * Set a block reader into an error state.
+ * 
+ * The provided code must not be SHASM_OKAY.  It can be anything else,
+ * though it should be defined in shasm_error.
+ * 
+ * If the block reader is already in an error state, this function
+ * performs no further action besides checking that the code is not
+ * SHASM_OKAY.
+ * 
+ * If the block reader is not currently in an error state, this function
+ * clears the buffer of the block reader to empty, sets the error
+ * status, and sets the line number field to the current line number of
+ * the input filter chain.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader to set to error state
+ * 
+ *   ps - the input filter chain to query for the line number
+ * 
+ *   code - the error code to set
+ */
+static void shasm_block_seterr(
+    SHASM_BLOCK *pb,
+    SHASM_IFLSTATE *ps,
+    int code) {
+  
+  /* Check parameters */
+  if ((pb == NULL) || (ps == NULL) || (code == SHASM_OKAY)) {
+    abort();
+  }
+  
+  /* Only set error state if not already in error state */
+  if (pb->code == SHASM_OKAY) {
+    /* Set error state */
+    shasm_block_clear(pb);
+    pb->code = code;
+    pb->line = shasm_input_count(ps);
+  }
+}
+
+/*
+ * Wrapper function for shasm_block_seterr that sets either the error
+ * SHASM_ERR_HUGEBLOCK or SHASM_ERR_LARGEBLOCK.
+ * 
+ * HUGEBLOCK is set if the adjusted constant SHASM_BLOCK_MAXBUFFER is
+ * greater than SHASM_BLOCK_MAXSTR (greater than to account for space
+ * for terminating null).  LARGEBLOCK is set otherwise.
+ * 
+ * This function determines the appropriate error and calls through to
+ * shasm_block_seterr with it.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader to set to error state
+ * 
+ *   ps - the input filter chain to query for the line number
+ */
+static void shasm_block_setbigerr(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
+  if (shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER) > SHASM_BLOCK_MAXSTR) {
+    shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
+  } else {
+    shasm_block_seterr(pb, ps, SHASM_ERR_LARGEBLOCK);
+  }
+}
 
 /*
  * Adjust a capacity constant if necessary for the current platform.
@@ -460,6 +533,239 @@ long shasm_block_line(SHASM_BLOCK *pb) {
  * shasm_block_token function.
  */
 int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
-  /* @@TODO: replace placeholder */
-  return 0;
+  
+  int status = 1;
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pb == NULL) || (ps == NULL)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error state */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Read zero or more bytes of whitespace and comments */
+  while (status) {
+    
+    /* Read zero or more filtered HT, SP, or LF characters until either
+     * a character that is not one of those three has been read, or EOF
+     * or I/O error */
+    for(c = shasm_input_get(ps);
+        (c == SHASM_ASCII_HT) || (c == SHASM_ASCII_SP) ||
+          (c == SHASM_ASCII_LF);
+        c = shasm_input_get(ps));
+    
+    /* Fail if stopped on EOF or I/O error */
+    if (c == SHASM_INPUT_EOF) {
+      /* Fail on EOF */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+      
+    } else if (c == SHASM_INPUT_IOERR) {
+      /* Fail on I/O error */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+    }
+    
+    /* If the non-whitespace character that was read is not the
+     * ampersand, then this is the first character of the token -- in
+     * this case, set the line number field of the block reader to the
+     * current line number, unread the character, and break out of this
+     * loop */
+    if (status && (c != SHASM_ASCII_AMPERSAND)) {
+      /* First token character found */
+      pb->line = shasm_input_count(ps);
+      shasm_input_back(ps);
+      break;
+    }
+    
+    /* If we got here, we just read an ampersand beginning a comment --
+     * proceed by reading characters until either LF, EOF, or I/O is
+     * encountered; leave the LF read as it is part of the comment */
+    if (status) {
+      /* Read the comment characters */
+      for(c = shasm_input_get(ps);
+          (c != SHASM_ASCII_LF) && (c != SHASM_INPUT_EOF) &&
+            (c != SHASM_INPUT_IOERR);
+          c = shasm_input_get(ps));
+      
+      /* Fail if EOF or I/O error */
+      if (c == SHASM_INPUT_EOF) {
+        /* Fail on EOF */
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+      
+      } else if (c == SHASM_INPUT_IOERR) {
+        /* Fail on I/O error */
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+      }
+    }
+    
+    /* Now that we've read the comment, loop back to read any further
+     * whitespace and comments */
+  }
+  
+  /* If we got here successfully, we just unread the first character of
+   * the token and set the line number of the token -- now clear the
+   * buffer to prepare for reading the token characters */
+  if (status) {
+    shasm_block_clear(pb);
+  }
+  
+  /* Read the first character of the token into the buffer, verifying
+   * that it is in visible, printing US-ASCII range */
+  if (status) {
+    /* Read the character and check for error */
+    c = shasm_input_get(ps);
+    if (c == SHASM_INPUT_EOF) {
+      /* Fail on EOF */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+    
+    } else if (c == SHASM_INPUT_IOERR) {
+      /* Fail on I/O error */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+    }
+    
+    /* Check range */
+    if (status &&
+          ((c < SHASM_ASCII_VISPRINT_MIN) ||
+            (c > SHASM_ASCII_VISPRINT_MAX))) {
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_TOKENCHAR);
+    }
+    
+    /* Add the character to the buffer */
+    if (status) {
+      if (!shasm_block_addByte(pb, c)) {
+        status = 0;
+        shasm_block_setbigerr(pb, ps);
+      }
+    }
+  }
+  
+  /* If the first character read was vertical bar, read the next
+   * character -- if it's semicolon, then add it to the buffer to yield
+   * the "|;" token; if it's anything else, unread it */
+  if (status && (pb->pBuf[0] == SHASM_ASCII_BAR)) {
+    /* Read the next character */
+    c = shasm_input_get(ps);
+    if (c == SHASM_INPUT_EOF) {
+      /* Fail on EOF */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+    
+    } else if (c == SHASM_INPUT_IOERR) {
+      /* Fail on I/O error */
+      status = 0;
+      shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+    }
+    
+    /* If next character is semicolon, add it to buffer; else, unread
+     * it */
+    if (status && (c == SHASM_ASCII_SEMICOLON)) {
+      /* Semicolon -- add it to buffer */
+      if (!shasm_block_addByte(pb, c)) {
+        status = 0;
+        shasm_block_setbigerr(pb, ps);
+      }
+      
+    } else {
+      /* Not a semicolon -- unread it */
+      shasm_input_back(ps);
+    }
+  }
+  
+  /* If the buffer currently is something other than ( ) [ ] , % ; " ' {
+   * or the special token "|;" then read additional token characters;
+   * else leave the buffer as it currently is */
+  if (status &&
+        (pb->pBuf[0] != SHASM_ASCII_LPAREN   ) &&
+        (pb->pBuf[0] != SHASM_ASCII_RPAREN   ) &&
+        (pb->pBuf[0] != SHASM_ASCII_LSQR     ) &&
+        (pb->pBuf[0] != SHASM_ASCII_RSQR     ) &&
+        (pb->pBuf[0] != SHASM_ASCII_COMMA    ) &&
+        (pb->pBuf[0] != SHASM_ASCII_PERCENT  ) &&
+        (pb->pBuf[0] != SHASM_ASCII_SEMICOLON) &&
+        (pb->pBuf[0] != SHASM_ASCII_DQUOTE   ) &&
+        (pb->pBuf[0] != SHASM_ASCII_SQUOTE   ) &&
+        (pb->pBuf[0] != SHASM_ASCII_LCURL    ) &&
+        (pb->pBuf[1] != SHASM_ASCII_SEMICOLON)) {
+    
+    /* Read zero or more additional token characters */
+    while (status) {
+      /* Read the next character */
+      c = shasm_input_get(ps);
+      if (c == SHASM_INPUT_EOF) {
+        /* Fail on EOF */
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+      
+      } else if (c == SHASM_INPUT_IOERR) {
+        /* Fail on I/O error */
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+      }
+      
+      /* If this is a stop character, then break out of the loop */
+      if (status && (
+            (c == SHASM_ASCII_HT       ) ||
+            (c == SHASM_ASCII_SP       ) ||
+            (c == SHASM_ASCII_LF       ) ||
+            (c == SHASM_ASCII_LPAREN   ) ||
+            (c == SHASM_ASCII_RPAREN   ) ||
+            (c == SHASM_ASCII_LSQR     ) ||
+            (c == SHASM_ASCII_RSQR     ) ||
+            (c == SHASM_ASCII_COMMA    ) ||
+            (c == SHASM_ASCII_PERCENT  ) ||
+            (c == SHASM_ASCII_SEMICOLON) ||
+            (c == SHASM_ASCII_AMPERSAND) ||
+            (c == SHASM_ASCII_DQUOTE   ) ||
+            (c == SHASM_ASCII_SQUOTE   ) ||
+            (c == SHASM_ASCII_LCURL    ))) {
+        break;
+      }
+      
+      /* Check range */
+      if (status &&
+            ((c < SHASM_ASCII_VISPRINT_MIN) ||
+              (c > SHASM_ASCII_VISPRINT_MAX))) {
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_TOKENCHAR);
+      }
+      
+      /* Not a stop character and range validated, so add to buffer */
+      if (status) {
+        if (!shasm_block_addByte(pb, c)) {
+          status = 0;
+          shasm_block_setbigerr(pb, ps);
+        }
+      }
+    }
+
+    /* If stopped on an inclusive stop character, add it to the buffer;
+     * else the stop character is exclusive so unread it */
+    if (status && (
+          (c == SHASM_ASCII_DQUOTE) ||
+          (c == SHASM_ASCII_SQUOTE) ||
+          (c == SHASM_ASCII_LCURL ))) {
+      /* Inclusive stop character -- add to buffer */
+      if (!shasm_block_addByte(pb, c)) {
+        status = 0;
+        shasm_block_setbigerr(pb, ps);
+      }
+      
+    } else if (status) {
+      /* Exclusive stop character -- unread it */
+      shasm_input_back(ps);
+    }
+  }
+  
+  /* Return status */
+  return status;
 }
