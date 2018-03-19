@@ -4,7 +4,7 @@ libshasm (pronounced "lib sha-ZAM") is a library that implements a Shastina lang
 
 For a specification of the Shastina language, see the [Canidtech website](https://www.canidtech.com/).  See the "Divergences" section below in this readme for differences between Shastina as described in the specification and Shastina as implemented in libshasm.
 
-As of March 15, 2018, the input filter chain has been completed.  This readme describes the current state of the project.
+As of March 19, 2018, the input filter chain and part of the block reader have been completed.  This readme describes the current state of the project.
 
 Development work on this library is being handled by Noah Johnson (canidlogic on GitHub).  He can be reached by email at noah.johnson@loupmail.com
 
@@ -42,7 +42,7 @@ The divergence, therefore, is that implementations of Shastina do not necessaril
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
 - [x] Input filtering chain (section 3)
-- [ ] Tokenization function (section 4)
+- [x] Tokenization function (section 4)
 - [ ] Normal string encoding (section 5.2)
 - [ ] Normal string decoding (section 5.1)
 - [ ] Base-16 special mode (section 5.3)
@@ -77,13 +77,17 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Define the shasm_block interface in a header
 - [x] Define the test_block testing module
 - [x] Implement the buffer functions of the block reader
-- [ ] Implement the token function of the block reader
+- [x] Implement the token function of the block reader
 
 The block interface and testing module will be limited to just the token function for now.  The string data functions will be added in subsequent roadmap steps.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
 ## 5. Releases
+
+### 0.2.0 (alpha)
+
+Established the block reader module (shasm_block) with just a token reader for now, and developed a test program (test_block) for testing the block reader module.
 
 ### 0.1.0 (alpha)
 
