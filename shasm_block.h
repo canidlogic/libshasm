@@ -9,6 +9,15 @@
  * This module converts a filtered stream of characters from shasm_input
  * into strings of zero to 65,535 bytes.
  * 
+ * On platforms where sizeof(size_t) is two bytes, this module will
+ * limit the total string size to 65,534 bytes so that the buffer
+ * capacity never goes beyond 65,535 bytes (the maximum unsigned 16-bit
+ * value), which includes space for the terminating null.  A fault will
+ * occur if this module is invoked on platforms where sizeof(size_t) is
+ * less than two bytes.  On 16-bit platforms, see in the implementation
+ * file the SHASM_BLOCK_MAXBUFFER constant, which may need to be
+ * adjusted to prevent memory faults.
+ * 
  * For multithreaded applications, this module is safe to use, provided
  * that each SHASM_BLOCK instance is only used from one thread at a 
  * time.
@@ -121,8 +130,8 @@ long shasm_block_count(SHASM_BLOCK *pb);
  * The client should not modify it or try to free it.  The pointer is
  * valid until another reading function is called or the block reader is
  * freed (whichever occurs first).  The client should call this function
- * again after each call to the reading function, in case the block
- * reader has reallocated the buffer.
+ * again after each call to a reading function, in case the block reader
+ * has reallocated the buffer.
  * 
  * If the length of the data is zero, then the returned pointer will
  * point to a string consisting solely of a null termination byte.
@@ -225,7 +234,9 @@ long shasm_block_line(SHASM_BLOCK *pb);
  * 
  * (3) If EOF is encountered, SHASM_ERR_EOF.
  * 
- * (4) If the token is longer than 65,535 bytes, SHASM_ERR_HUGEBLOCK.
+ * (4) If the token is too long to fit in the buffer, either the error
+ * SHASM_ERR_HUGEBLOCK or the error SHASM_ERR_LARGEBLOCK.  See the
+ * documentation of those errors for the difference.
  * 
  * (5) If a filtered character that is not in US-ASCII printing range
  * (0x21-0x7e) and not HT SP or LF is encountered, SHASM_ERR_TOKENCHAR,
