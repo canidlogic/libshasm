@@ -30,6 +30,14 @@ The line unghosting filter discards whitespace sequences consisting of SP and HT
 
 With the caveat that the tab unghosting filter may change the alignment of text in certain circumstances, the tab and line unghosting filter sequence should have the same effect as the original unghosting filter, while being much easier to implement.
 
+### 2.2 Maximum block and string length
+
+Section 5.5 and a few other sections of draft 3V:C4-5 of the Shastina Specification establish a limit of 65,535 bytes as the maximum length of decoded string literals.  libshasm works according to this specification, except when the size_t is less than 32-bit or the implementation constant SHASM_BLOCK_MAXBUFFER has been adjusted in the block reader implementation.  In these cases, there is an implementation limit on strings that is lower than 65,535 bytes.
+
+If size_t is less than 32-bit but SHASM_BLOCK_MAXBUFFER has not been adjusted, then this lower implementation limit on string length is 65,534 bytes, which is just one byte shy of the specification.  However, if SHASM_BLOCK_MAXBUFFER is adjusted down, this limit may be significantly lower.  libshasm distinguishes between the specification limit and the implementation limit by raising SHASM_ERR_HUGEBLOCK if the specification limit has been exceeded or SHASM_ERR_LARGEBLOCK if the implementation-specific lower limit has been exceeded -- see the documentation of those errors for further information.
+
+The divergence, therefore, is that implementations of Shastina do not necessarily support the full 65,535-byte string length.  An updated draft of the specification should set a minimum implementation limit and say that the actual limit is somewhere between this minimum implementation limit and 65,535.  The documentation within the libshasm sources can then be clarified.
+
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
@@ -68,7 +76,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 
 - [x] Define the shasm_block interface in a header
 - [x] Define the test_block testing module
-- [ ] Implement the buffer functions of the block reader
+- [x] Implement the buffer functions of the block reader
 - [ ] Implement the token function of the block reader
 
 The block interface and testing module will be limited to just the token function for now.  The string data functions will be added in subsequent roadmap steps.

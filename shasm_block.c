@@ -10,10 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* @@TODO: finish the implementation */
-/* @@TODO: spec divergence to change maximum string length so it can
- * be supported on 16-bit platforms */
-
 /*
  * The initial capacity of the block buffer in bytes, as a signed long
  * constant.
@@ -458,4 +454,12 @@ long shasm_block_line(SHASM_BLOCK *pb) {
   
   /* Return result */
   return result;
+}
+
+/*
+ * shasm_block_token function.
+ */
+int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
+  /* @@TODO: replace placeholder */
+  return 0;
 }
