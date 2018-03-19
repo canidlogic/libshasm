@@ -234,7 +234,9 @@ long shasm_block_line(SHASM_BLOCK *pb);
  * 
  * (3) If EOF is encountered, SHASM_ERR_EOF.
  * 
- * (4) If the token is longer than 65,535 bytes, SHASM_ERR_HUGEBLOCK.
+ * (4) If the token is too long to fit in the buffer, either the error
+ * SHASM_ERR_HUGEBLOCK or the error SHASM_ERR_LARGEBLOCK.  See the
+ * documentation of those errors for the difference.
  * 
  * (5) If a filtered character that is not in US-ASCII printing range
  * (0x21-0x7e) and not HT SP or LF is encountered, SHASM_ERR_TOKENCHAR,

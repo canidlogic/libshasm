@@ -138,7 +138,6 @@ struct SHASM_BLOCK_TAG {
  */
 
 static long shasm_block_adjcap(long v);
-
 static void shasm_block_clear(SHASM_BLOCK *pb);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
 
@@ -224,9 +223,9 @@ static void shasm_block_clear(SHASM_BLOCK *pb) {
  * This might cause the buffer to be reallocated, so pointers returned
  * by shasm_block_ptr become invalid after calling this function.
  * 
- * This function will fail if the buffer already has SHASM_BLOCK_MAXSTR
- * bytes in it.  In this case, the internal buffer will be cleared and
- * the block reader will be set to error SHASM_ERR_HUGEBLOCK.
+ * The function will fail if there is no more room for another
+ * character.  This function does *not* set an error state within the
+ * block reader if it fails, leaving that for the client.
  * 
  * If this function is called when the block reader is already in an
  * error state, the function fails and does nothing further.
@@ -241,8 +240,66 @@ static void shasm_block_clear(SHASM_BLOCK *pb) {
  * 
  *   non-zero if successful, zero if failure
  */
-static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
-/* @@TODO: */
+static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
+  int status = 1;
+  
+  /* Check parameters */
+  if ((pb == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Fail immediately if already in error state */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* If buf_len is one less than buf_cap, buffer capacity needs to be
+   * increased -- the "one less" is to account for the terminating
+   * null */
+  if (status && (pb->buf_len >= pb->buf_cap - 1)) {
+    /* If buffer capacity already at adjusted maximum capacity, fail */
+    if (pb->buf_len >= shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+      status = 0;
+    }
+    
+    /* Room to grow still -- new capacity is minimum of double the
+     * current capacity and the adjusted maximum capacity */
+    if (status) {
+      pb->buf_cap *= 2;
+      if (pb->buf_cap > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+        pb->buf_cap = shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER);
+      }
+    }
+    
+    /* Expand the size of the buffer to the new capacity */
+    if (status) {
+      pb->pBuf = (unsigned char *) realloc(
+                    pb->pBuf, (size_t) pb->buf_cap);
+      if (pb->pBuf == NULL) {
+        abort();
+      }
+    }
+    
+    /* Clear the expanded buffer contents to zero */
+    if (status) {
+      memset(&(pb->pBuf[pb->buf_len]), 0, pb->buf_cap - pb->buf_len);
+    }
+  }
+  
+  /* If we're adding a null byte, set the null_present flag */
+  if (status && (c == 0)) {
+    pb->null_present = 1;
+  }
+  
+  /* Append the new byte */
+  if (status) {
+    pb->pBuf[pb->buf_len] = (unsigned char) c;
+    (pb->buf_len)++;
+  }
+  
+  /* Return status */
+  return status;
+}
 
 /*
  * Public functions
