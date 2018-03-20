@@ -57,29 +57,32 @@ The current development roadmap is as follows.  Section references are to the Sh
 Tasks will be completed in the order shown above.  This roadmap may be revised along the way.
 
 ## 4. Current goal
-The current goal is the second stage of the roadmap, which is to complete the tokenization function.  However, this stage of the roadmap will also lay the groundwork for the next few stages (up to and including base-85 special mode).
+The current goal is the third stage of the roadmap, which is to complete the normal string encoding functionality of the block reader.
 
-Whereas the first stage of the roadmap considered the input as a sequence of characters and performed character-based filtering operations, the next stages of the roadmap consider the input as a sequence of blocks.  The purpose of these stages is to transform the filtered character input into blocks.
+This roadmap stage makes use of the block reader architecture and testing module established in the previous roadmap stage.  This stage is closely linked with the next one, which together add a normal string data reader to the block reader module.  Since normal string data interpretation is rather complex, adding the normal string data reader is split into two separate roadmap stages.
 
-A block is defined here as a string of bytes with a length between zero bytes (empty) and 65,535 bytes.  A block reader module (shasm_block) will be defined that can read blocks from the filtered input stream of characters.  The block reader will support reading tokens, normal string data, base-16 string data, and base-85 string data.  Each of these reading operations will have its own function in the block reader.  However, the block output of each of these reading operations will use the same buffer within the block reader.
+In this first stage of adding normal string data reading, the focus is on establishing the string encoding component, which converts decoded entity codes into the output bytes that are placed in the result string.  The next roadmap stage will then complete normal string data reading functionality by adding the string decoding component, which converts filtered input bytes into entity codes.  In short, a bottom-up model will be used to complete the normal string data reading functionality, where the module closest to output is completed first, and then the module closest to input is added on top of it.
 
-The goal of the second stage of the roadmap is therefore not only to complete the tokenization function, but also to define the block reader module.  Once the block reader module is defined, the next few roadmap stages will simply add additional reader functions to the block reader module to support string data.
+In order to be able to test the string encoding functionality, this roadmap stage will define the interface of the full string data reader function and add a placeholder for the decoding stage that ignores input and instead just sends a hardwired sequence of entity codes to the string encoding component.  This will allow the testing module to test the string encoding component as if the string decoding component already existed -- in actuality, program input will be ignored and the placeholder decoder will always provide the encoder with a fixed testing sequence of entity codes.
 
-The second stage of the roadmap will also define a testing module (test_block) that is able to test each of the block reading functions.  The next roadmap stages can therefore make use of test_block without having to define their own testing modules.
+The specific goals of this roadmap stage are therefore to extend the block reader interface with a normal string data reading function; to add a "string" mode to the test_block program, which reads normal string data from input and reports the result to standard output; to implement the string encoding component; and to define a placeholder string decoding component.
 
-The block testing module is a program that reads from standard input using the block reader module and reports on standard output the blocks that have been read.  A command-line parameter chooses what kind of blocks the block reader module will read from input.  For this roadmap stage, there will only be a "token" mode, which uses the token reader to read one or more token blocks from input, ending when the "|;" block is encountered.  (Note that this not able to parse full Shastina files, because it lacks string data reading functionality.)  Subsequent roadmap stages will add their own modes to the block testing module.
+In the next stage, all that must be done is to replace the string encoding component placeholder with an actual implementation.  Then normal string data reading will have been successfully added to the block reader.
 
-Once the second roadmap stage has been completed, an alpha 0.2.0 release will be made.  The subsequent block reading roadmap stages will be handled as patch releases (0.2.1, 0.2.2, etc.) such that at the end of the 0.2.x alpha series, the block reading layer of shasm will be complete.
+Once this roadmap stage has been completed, an alpha 0.2.1 release will be made, keeping with the schedule of handling each roadmap stage that builds out the functionality of the block reader as a separate patch release of the 0.2.x series.
 
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [x] Define the shasm_block interface in a header
-- [x] Define the test_block testing module
-- [x] Implement the buffer functions of the block reader
-- [x] Implement the token function of the block reader
+- [ ] Define the normal string reading interface
+- [ ] Extend the block testing program with a string mode
+- [ ] Define a placeholder string decoder function
+- [ ] Define the string encoder, except for output overrides
+- [ ] Add UTF-8 and CESU-8 output overrides
+- [ ] Add UTF-16 little and big endian overrides
+- [ ] Add UTF-32 little and big endian overrides
 
-The block interface and testing module will be limited to just the token function for now.  The string data functions will be added in subsequent roadmap steps.
+The string mode for the testing program will read a string from standard input and report the result string to standard output, along with the rest of the input that follows the string data.  The result string is reported with escape sequences standing in for bytes outside of ASCII printing range.  Command-line parameters allow the particular output override mode to be selected, or a non-override mode using a hardwired test encoding table.  Input override mode will always be selected during testing.  A hardwired test decoding map will be used.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
