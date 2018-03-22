@@ -43,6 +43,168 @@ struct SHASM_BLOCK_TAG;
 typedef struct SHASM_BLOCK_TAG SHASM_BLOCK;
 
 /*
+ * Structure for storing callback information related to decoding map
+ * used during the decoding phase of normal string data processing.
+ * 
+ * It is up to the client implementation to decide what kind of data
+ * structure to use to implement the decoding map.  The interface within
+ * this structure works similar to a "trie."  Its initial position is
+ * the node corresponding to the empty string.  Branch operations allow
+ * movement to a node that has one additional character beyond the
+ * current node.  Each node may have an entity value associated with it.
+ * 
+ * The way keys and values are encoded is that one starts at the root
+ * with the empty string and performs zero or more branch operations to
+ * add the characters in the key one by one until the node corresponding
+ * to the full key value has been reached.  If there is a value (an
+ * entity code) associated with the key, it will be stored at the node
+ * that has been reached after this operation.
+ * 
+ * Each character in the key is an unsigned byte value (0-255).  Each
+ * value is an entity code, which may have any non-negative signed long
+ * value.
+ */
+typedef struct {
+  
+  /*
+   * Parameter that is passed through to each callback.
+   * 
+   * The interpretation of this parameter is entirely up to the client.
+   * It may be NULL if not needed.
+   */
+  void *pCustom;
+  
+  /*
+   * Reset the decoding map to its initial state.
+   * 
+   * The initial state is the empty string.  The void * parameter is the
+   * pCustom field that is passed through.
+   * 
+   * This parameter may not be NULL.
+   */
+  void (*fpReset)(void *);
+  
+  /*
+   * Attempt to branch to another node.
+   * 
+   * The void * parameter is the pCustom field that is passed through.
+   * The int parameter is an unsigned byte value (0-255) that represents
+   * the next character to branch to.
+   * 
+   * If the decoding map has successfully branched to a new node, return
+   * a non-zero value.  If no branch exists corresponding to the
+   * provided unsigned byte value, stay on the current node and return a
+   * zero value.
+   */
+  int (*fpBranch)(void *, int);
+  
+  /*
+   * Read the entity code associated with the current node.
+   * 
+   * If there is no associated entity code, return a negative value.
+   * Otherwise, a value greater than or equal to zero is interpreted as
+   * an entity code.
+   */
+  long (*fpEntity)(void *);
+  
+} SHASM_BLOCK_DECODER;
+
+/*
+ * Structure representing information about a numeric escape.
+ * 
+ * Numeric escapes are an optional feature supported during normal
+ * string data decoding.  This feature allows the numeric value of a
+ * desired entity code to be embedded within the string data as a
+ * sequence of base-16 or base-10 ASCII digits.  This structure
+ * specifies how to decode the sequence of digits.
+ */
+typedef struct {
+  
+  /*
+   * Flag for selecting base-16 mode.
+   * 
+   * If this field is non-zero, then each digit is a base-16 digit,
+   * which includes ASCII decimal digits 0-9, ASCII lowercase letters
+   * a-f, and ASCII uppercase letters A-F.
+   * 
+   * If this field is zero, then each digit is a base-10 (decimal)
+   * digit, which includes ASCII decimal digits 0-9.
+   */
+  int base16;
+  
+  /*
+   * The minimum number of digits that must be provided in a numeric
+   * escape.
+   * 
+   * This value must be one or greater.  At least this many digits must
+   * be present in the escape or there will be an error.
+   */
+  int min_len;
+  
+  /*
+   * The maximum number of digits that must be provided in a numeric
+   * escape.
+   * 
+   * This value must either be -1, indicating that there is no maximum,
+   * or it must be greater than or equal to min_len.  At most this many
+   * digits may be present in the escape.  The numeric escape does not
+   * proceed beyond this many digits, even if the next character in
+   * input would also count as a digit.
+   */
+  int max_len;
+  
+  /*
+   * The maximum entity value that may be encoded in the digit sequence.
+   * 
+   * The sequence of one or more digits encodes an unsigned value of
+   * zero up to and including max_entity.  If the encoded value is
+   * greater than max_entity, there is an error.
+   */
+  long max_entity;
+  
+  /*
+   * Flag for blocking the Unicode surrogate range.
+   * 
+   * If this value is non-zero, then decoded entity values in the range
+   * 0xD800 up to and including 0xDFFF will cause an error, since these
+   * correspond to a Unicode high or low surrogate.
+   * 
+   * This is useful when entity codes correspond to Unicode codepoints,
+   * and the client wishes to disallow surrogates.  Note, however, that
+   * entity codes are not required to correspond to Unicode codepoints.
+   * 
+   * If this value is zero, then the full range of zero up to and
+   * including max_entity is available for encoded entity values.
+   * 
+   * It is acceptable to set this flag even if max_entity is less than
+   * 0xD800.  (The flag won't do anything in this case.)
+   */
+  int block_surrogates;
+  
+  /*
+   * The terminal byte value.
+   * 
+   * This is either -1, indicating that there is no terminal byte, or it
+   * is an unsigned byte value (0-255).
+   * 
+   * In base-16 mode, the terminal may not correspond to the ASCII value
+   * for decimal digits 0-9, lowercase letters a-f, or uppercase letters
+   * A-F.
+   * 
+   * In base-10 mode, the terminal may not correspond to the ASCII value
+   * for decimal digits 0-9.
+   * 
+   * If the terminal byte value is specified, then the digit sequence
+   * must end with this terminal byte value or there will be an error.
+   * 
+   * This is useful for handling escaping systems where the digit
+   * sequence ends with a specific character, such as a semicolon.
+   */
+  int terminal;
+  
+} SHASM_BLOCK_NUMESCAPE;
+
+/*
  * Allocate a block reader.
  * 
  * The returned block reader should eventually be freed with
