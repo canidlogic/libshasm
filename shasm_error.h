@@ -71,4 +71,27 @@
  */
 #define SHASM_ERR_TOKENCHAR (5)
 
+/*
+ * A regular string contained a byte that couldn't be decoded.
+ */
+#define SHASM_ERR_STRINGCHAR (6)
+
+/*
+ * A numeric escape within a regular string had an improper format.
+ */
+#define SHASM_ERR_BADNUMESC (7)
+
+/*
+ * A numeric escape within a regular string selected an entity code
+ * value that is above the acceptable range for the numeric escape.
+ */
+#define SHASM_ERR_NUMESCRANGE (8)
+
+/*
+ * A numeric escape within a regular string selected an entity code in
+ * Unicode surrogate range, when this is not allowed for the particular
+ * numeric escape type.
+ */
+#define SHASM_ERR_NUMESCSUR (9)
+
 #endif
