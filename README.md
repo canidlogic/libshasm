@@ -38,6 +38,14 @@ If size_t is less than 32-bit but SHASM_BLOCK_MAXBUFFER has not been adjusted, t
 
 The divergence, therefore, is that implementations of Shastina do not necessarily support the full 65,535-byte string length.  An updated draft of the specification should set a minimum implementation limit and say that the actual limit is somewhere between this minimum implementation limit and 65,535.  The documentation within the libshasm sources can then be clarified.
 
+(On further thought, it might be better to leave the 65,535-byte limit as it is in the specification and drop support for environments with less than 32-bit size_t values in the libshasm implementation.  This matter will be brought up again when revising the Shastina Specification.)
+
+### 2.3 Removal of implementation details
+
+Sections 5.1 and 5.2 of draft 3V:C4-5 of the Shastina Specification (and possibly other sections) include references to specific implementation details, such as specifying that the decoding map be implemented by an rtrie or suggesting that the encoding map be handled with a umap.
+
+These specifics of implementation should not appear in the specification.  Moreover, libshasm has been written so that the client can choose how to implement these structures, so libshasm is not even bound to these suggestions.
+
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
