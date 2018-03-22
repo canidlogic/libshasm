@@ -35,6 +35,69 @@
 #define SHASM_BLOCK_MAXSTR (65535L)
 
 /*
+ * Constants for the types of normal strings.
+ * 
+ * This selects either "" '' or {} strings.
+ */
+#define SHASM_BLOCK_STYPE_DQUOTE (1)   /* "" strings */
+#define SHASM_BLOCK_STYPE_SQUOTE (2)   /* '' strings */
+#define SHASM_BLOCK_STYPE_CURLY  (3)   /* {} strings */
+
+/*
+ * Constants for the input override modes for normal string decoding.
+ * 
+ * In "none" mode, there is no input override and everything is handled
+ * by the decoding map.
+ * 
+ * In "utf8" mode, all bytes in the string data that have their most
+ * significant bit set will be interpreted as UTF-8 sequences and they
+ * will decode to entity codes matching the Unicode codepoint they
+ * represent.  Properly paired surrogates encoded in UTF-8 will be
+ * replaced by the supplemental character they represent in the decoded
+ * entities.  Improperly paired surrogates will be output as an entity
+ * code matching the surrogate value.  Improper UTF-8 sequences and
+ * overlong UTF-8 encodings will cause errors.
+ */
+#define SHASM_BLOCK_IMODE_NONE (0)    /* no input override */
+#define SHASM_BLOCK_IMODE_UTF8 (1)    /* UTF-8 input override */
+
+/*
+ * Constants for the output override modes for normal string encoding.
+ * 
+ * In "none" mode, there is no output override and everything is handled
+ * by the encoding map.
+ * 
+ * In "utf8" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-8 on output, with supplemental characters represented
+ * by a single UTF-8 character, as is standard for UTF-8.
+ * 
+ * In "cesu8" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-8 on output, with supplemental characters first
+ * represented as a surrogate pair, and then each surrogate character
+ * encoded in UTF-8.  This is not standard UTF-8 handling for
+ * supplemental characters, but it is sometimes useful.
+ * 
+ * In "u16le" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-16 on output, with little endian byte order.
+ * 
+ * In "u16be" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-16 on output, with big endian byte order.
+ * 
+ * In "u32le" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-32 on output, with little endian byte order.
+ * 
+ * In "u32be" mode, entity codes in range 0x0 through 0x10ffff will be
+ * encoded in UTF-32 on output, with big endian byte order.
+ */
+#define SHASM_BLOCK_OMODE_NONE (0)    /* no output override */
+#define SHASM_BLOCK_OMODE_UTF8 (1)    /* UTF-8 output override */
+#define SHASM_BLOCK_OMODE_CESU8 (2)   /* CESU-8 output override */
+#define SHASM_BLOCK_OMODE_U16LE (3)   /* UTF-16 little endian */
+#define SHASM_BLOCK_OMODE_U16BE (4)   /* UTF-16 big endian */
+#define SHASM_BLOCK_OMODE_U32LE (5)   /* UTF-32 little endian */
+#define SHASM_BLOCK_OMODE_U32BE (6)   /* UTF-32 big endian */
+
+/*
  * Structure prototype for the block reader state structure.
  * 
  * The actual structure is defined in the implementation.
@@ -95,6 +158,8 @@ typedef struct {
    * a non-zero value.  If no branch exists corresponding to the
    * provided unsigned byte value, stay on the current node and return a
    * zero value.
+   * 
+   * This parameter may not be NULL.
    */
   int (*fpBranch)(void *, int);
   
@@ -104,6 +169,8 @@ typedef struct {
    * If there is no associated entity code, return a negative value.
    * Otherwise, a value greater than or equal to zero is interpreted as
    * an entity code.
+   * 
+   * This parameter may not be NULL.
    */
   long (*fpEntity)(void *);
   
@@ -314,10 +381,130 @@ typedef struct {
    * the buffer is expanded and the callback is invoked again.  This
    * proceeds until the query finally works.  This also allows the
    * encoding map to change as the encoding process goes along.
+   * 
+   * If this function pointer is NULL, the encoding table is assumed to
+   * be empty, with every key mapping to an empty byte sequence.  This
+   * could be appropriate if an output override is being used.
    */
   long (*fpMap)(void *, long, unsigned char *, long);
   
 } SHASM_BLOCK_ENCODER;
+
+/*
+ * Structure for defining how normal string data is to be read.
+ * 
+ * This structure provides all the parameters necessary for the decoding
+ * and encoding phases for normal string data.
+ */
+typedef struct {
+  
+  /*
+   * The string type.
+   * 
+   * This determines whether the string data is a "" '' or {} string.
+   * 
+   * It must be one of the SHASM_BLOCK_STYPE constants.
+   */
+  int stype;
+  
+  /*
+   * The decoding map to use during the decoding phase.
+   * 
+   * Byte sequences in the string data are converted to entity codes by
+   * consulting this decoding table using first match and then longest
+   * match to resolve ambiguous cases.
+   * 
+   * However, certain keys that are associated with entity codes in the
+   * decoding map will be ignored.  The following keys are ignored:
+   * 
+   * (1) The empty string
+   * 
+   * (2) In a "" string, any key that has a " character in a position
+   * other than the last (or only) character.  In a '' string, any key
+   * that has a ' character in a position other than the last (or only)
+   * character.  In a {} string, and key that has a { or } character in
+   * a position other than the last (or only) character.
+   * 
+   * (3) In a "" string, the key consisting only of "
+   * 
+   * (4) In a '' string, the key consisting only of '
+   * 
+   * (5) In a {} string, the key consisting only of } is ignored if the
+   * curly bracket nesting level is the same level it was at the start
+   * of the string data; else it can be matched in the decoding map.
+   * 
+   * (6) If an input override is selected (see i_over) then any key
+   * containing a byte falling in a certain range of input bytes
+   * specific to the input override will be ignored.
+   */
+  SHASM_BLOCK_DECODER dec;
+  
+  /*
+   * The input override to use, or SHASM_BLOCK_IMODE_NONE for no input
+   * override.
+   * 
+   * If an input override is in place, then certain bytes of the string
+   * data may be processed by the override rather than being handled in
+   * the normal way by the decoding map.
+   * 
+   * This field must be one of the SHASM_BLOCK_IMODE constants.
+   */
+  int i_over;
+  
+  /*
+   * The numeric escape list.
+   * 
+   * Each entity code that is decoded will be checked against the
+   * numeric escape list.  If the entity code is on the numeric escape
+   * list, the entity code will not be sent to the encoder.  Instead, a
+   * numeric escape will be read and the decoded entity value will be
+   * sent to the encoder.
+   */
+  SHASM_BLOCK_ESCLIST elist;
+  
+  /*
+   * The encoding table to use during the encoding phase of interpreting
+   * normal string data.
+   * 
+   * Entity codes received from the decoder will be converted into
+   * sequences of output bytes using this encoding table.  The only
+   * exception is that if one of the output override modes is selected
+   * (see o_over), then certain ranges of entity codes will be handled
+   * by the output override rather than by the encoding table.
+   */
+  SHASM_BLOCK_ENCODER enc;
+  
+  /*
+   * The output override to use, or SHASM_BLOCK_OMODE_NONE for no output
+   * override.
+   * 
+   * If an output override is in place, then certain ranges of entity
+   * codes may be processed by the override rather than being handled in
+   * the normal way by the encoding table.
+   * 
+   * This field must be one of the SHASM_BLOCK_OMODE constants.
+   */
+  int o_over;
+  
+  /*
+   * A flag indicating whether an output override is in "strict" mode.
+   * 
+   * This flag is ignored if no output override is in place.
+   * 
+   * If an output override is in place and if strict mode is selected,
+   * then the output override will not cover entity codes in Unicode
+   * surrogate range (0xD800 up to and including 0xDFFF), with these
+   * surrogate codepoints instead being handled in the normal manner by
+   * the encoding table.
+   * 
+   * If an output override is in place and if strict mode is not
+   * selected, then Unicode surrogate range will be covered and handled
+   * like any other codepoint (which allows for improperly paired
+   * surrogates).
+   */
+  int o_strict;
+  
+} SHASM_BLOCK_STRING;
 
 /*
  * Allocate a block reader.
