@@ -43,8 +43,8 @@ struct SHASM_BLOCK_TAG;
 typedef struct SHASM_BLOCK_TAG SHASM_BLOCK;
 
 /*
- * Structure for storing callback information related to decoding map
- * used during the decoding phase of normal string data processing.
+ * Structure for storing callback information related to the decoding
+ * map used during the decoding phase of normal string data processing.
  * 
  * It is up to the client implementation to decide what kind of data
  * structure to use to implement the decoding map.  The interface within
@@ -203,6 +203,121 @@ typedef struct {
   int terminal;
   
 } SHASM_BLOCK_NUMESCAPE;
+
+/*
+ * Structure for storing callback information related to numeric escapes
+ * used during the decoding phase of normal string data processing.
+ * 
+ * This callback lets the client specify which decoded entity codes in
+ * the input (if any) should be interpreted as numeric escapes, and
+ * provide definitions of the kind of numeric escapes in use.
+ */
+typedef struct {
+  
+  /*
+   * Parameter that is passed through to the callback.
+   * 
+   * The interpretation of this parameter is entirely up to the client.
+   * It may be NULL if not needed.
+   */
+  void *pCustom;
+  
+  /*
+   * Callback for querying whether an input entity code represents a
+   * numeric escape.
+   * 
+   * The void * is the pCustom parameter that is passed through.  The
+   * long value is the entity code to check, which must not be negative.
+   * 
+   * If the provided entity code is for the start of a numeric escape,
+   * then the function should fill in information about the numeric
+   * escape in the provided SHASM_BLOCK_NUMESCAPE structure (see that
+   * structure for further information) and return non-zero.
+   * 
+   * In this case, the entity code for the numeric escape is not passed
+   * through to the output encoder.  Instead, the numeric escape will be
+   * decoded and the entity value encoded in the numeric escape will
+   * then be passed through to the output encoder.
+   * 
+   * If the provided entity code is not for the start of a numeric
+   * escape, then the function should return zero and it can ignore the
+   * SHASM_BLOCK_NUMESCAPE parameter.
+   * 
+   * This function pointer is allowed to be NULL.  In that case, it will
+   * be assumed that there are no numeric escapes.
+   */
+  int (*fpEscQuery)(void *, long, SHASM_BLOCK_NUMESCAPE *);
+  
+} SHASM_BLOCK_ESCLIST;
+
+/*
+ * Structure for storing callback information related to the encoding
+ * map used during the encoding phase of normal string data processing.
+ * 
+ * The encoding map is a key/value map where entity codes received from
+ * the normal string data decoder are the key and the value is a
+ * sequence of zero or more unsigned byte values (0-255) to output in
+ * the resulting string.
+ * 
+ * For unrecognized entity keys, an empty sequence zero bytes in length
+ * should be returned.
+ */
+typedef struct {
+  
+  /*
+   * Parameter that is passed through to the callback.
+   * 
+   * The interpretation of this parameter is entirely up to the client.
+   * It may be NULL if not needed.
+   */
+  void *pCustom;
+  
+  /*
+   * Callback for querying the encoding map.
+   * 
+   * The void * parameter is the pCustom pass-through parameter.
+   * 
+   * The first long parameter is the entity code key, which must not be
+   * a negative value.
+   * 
+   * The unsigned char * and the second long parameter are a pointer to
+   * a buffer to receive the output sequence of bytes, and the length of
+   * this buffer in bytes.
+   * 
+   * The return value is the number of output bytes the provided entity
+   * maps to.  It must not be negative.  If it is zero, it means the
+   * entity has no associated output bytes (or that the entity is not a
+   * recognized key value).  In this case, the output buffer can be
+   * completely ignored.
+   * 
+   * If the return value is greater than zero and less than or equal to
+   * the length of the passed buffer, then the buffer will have been
+   * filled in with the appropriate output sequence and the return value
+   * determines how many bytes to use.  The output sequence need not be
+   * null terminated, and null bytes are allowed in the output data --
+   * the return value determines how many bytes in the output buffer are
+   * actually used.
+   * 
+   * If the return value is greater than the length of the passed
+   * buffer, then it means the buffer wasn't large enough to store the
+   * output bytes.  The output buffer can be completely ignored in this
+   * case.
+   * 
+   * It is allowed for the buffer pointer to be NULL and the buffer
+   * length to be zero.  This can be used to check whether a particular
+   * key maps to a non-empty output sequence, and what length of buffer
+   * needs to be allocated to store a particular output sequence.
+   * 
+   * Fetching a particular output sequence might be handled as a loop
+   * that proceeds until the buffer has been expanded enough to fit the
+   * output sequence.  If the callback returns it needs a larger buffer,
+   * the buffer is expanded and the callback is invoked again.  This
+   * proceeds until the query finally works.  This also allows the
+   * encoding map to change as the encoding process goes along.
+   */
+  long (*fpMap)(void *, long, unsigned char *, long);
+  
+} SHASM_BLOCK_ENCODER;
 
 /*
  * Allocate a block reader.
