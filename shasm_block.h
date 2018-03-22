@@ -35,7 +35,7 @@
 #define SHASM_BLOCK_MAXSTR (65535L)
 
 /*
- * Constants for the types of normal strings.
+ * Constants for the types of regular strings.
  * 
  * This selects either "" '' or {} strings.
  */
@@ -44,7 +44,7 @@
 #define SHASM_BLOCK_STYPE_CURLY  (3)   /* {} strings */
 
 /*
- * Constants for the input override modes for normal string decoding.
+ * Constants for the input override modes for regular string decoding.
  * 
  * In "none" mode, there is no input override and everything is handled
  * by the decoding map.
@@ -62,7 +62,7 @@
 #define SHASM_BLOCK_IMODE_UTF8 (1)    /* UTF-8 input override */
 
 /*
- * Constants for the output override modes for normal string encoding.
+ * Constants for the output override modes for regular string encoding.
  * 
  * In "none" mode, there is no output override and everything is handled
  * by the encoding map.
@@ -107,7 +107,7 @@ typedef struct SHASM_BLOCK_TAG SHASM_BLOCK;
 
 /*
  * Structure for storing callback information related to the decoding
- * map used during the decoding phase of normal string data processing.
+ * map used during the decoding phase of regular string data processing.
  * 
  * It is up to the client implementation to decide what kind of data
  * structure to use to implement the decoding map.  The interface within
@@ -179,7 +179,7 @@ typedef struct {
 /*
  * Structure representing information about a numeric escape.
  * 
- * Numeric escapes are an optional feature supported during normal
+ * Numeric escapes are an optional feature supported during regular
  * string data decoding.  This feature allows the numeric value of a
  * desired entity code to be embedded within the string data as a
  * sequence of base-16 or base-10 ASCII digits.  This structure
@@ -273,7 +273,7 @@ typedef struct {
 
 /*
  * Structure for storing callback information related to numeric escapes
- * used during the decoding phase of normal string data processing.
+ * used during the decoding phase of regular string data processing.
  * 
  * This callback lets the client specify which decoded entity codes in
  * the input (if any) should be interpreted as numeric escapes, and
@@ -319,10 +319,10 @@ typedef struct {
 
 /*
  * Structure for storing callback information related to the encoding
- * map used during the encoding phase of normal string data processing.
+ * map used during the encoding phase of regular string data processing.
  * 
  * The encoding map is a key/value map where entity codes received from
- * the normal string data decoder are the key and the value is a
+ * the regular string data decoder are the key and the value is a
  * sequence of zero or more unsigned byte values (0-255) to output in
  * the resulting string.
  * 
@@ -391,10 +391,10 @@ typedef struct {
 } SHASM_BLOCK_ENCODER;
 
 /*
- * Structure for defining how normal string data is to be read.
+ * Structure for defining how regular string data is to be read.
  * 
  * This structure provides all the parameters necessary for the decoding
- * and encoding phases for normal string data.
+ * and encoding phases for regular string data.
  */
 typedef struct {
   
@@ -464,7 +464,7 @@ typedef struct {
   
   /*
    * The encoding table to use during the encoding phase of interpreting
-   * normal string data.
+   * regular string data.
    * 
    * Entity codes received from the decoder will be converted into
    * sequences of output bytes using this encoding table.  The only

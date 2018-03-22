@@ -57,8 +57,8 @@ The current development roadmap is as follows.  Section references are to the Sh
 
 - [x] Input filtering chain (section 3)
 - [x] Tokenization function (section 4)
-- [ ] Normal string encoding (section 5.2)
-- [ ] Normal string decoding (section 5.1)
+- [ ] Regular string encoding (section 5.2)
+- [ ] Regular string decoding (section 5.1)
 - [ ] Base-16 special mode (section 5.3)
 - [ ] Base-85 special mode (section 5.4)
 - [ ] Numeric literals (section 6.2)
@@ -71,24 +71,24 @@ The current development roadmap is as follows.  Section references are to the Sh
 Tasks will be completed in the order shown above.  This roadmap may be revised along the way.
 
 ## 4. Current goal
-The current goal is the third stage of the roadmap, which is to complete the normal string encoding functionality of the block reader.
+The current goal is the third stage of the roadmap, which is to complete the regular string encoding functionality of the block reader.
 
-This roadmap stage makes use of the block reader architecture and testing module established in the previous roadmap stage.  This stage is closely linked with the next one, which together add a normal string data reader to the block reader module.  Since normal string data interpretation is rather complex, adding the normal string data reader is split into two separate roadmap stages.
+This roadmap stage makes use of the block reader architecture and testing module established in the previous roadmap stage.  This stage is closely linked with the next one, which together add a regular string data reader to the block reader module.  Since regular string data interpretation is rather complex, adding the regular string data reader is split into two separate roadmap stages.
 
-In this first stage of adding normal string data reading, the focus is on establishing the string encoding component, which converts decoded entity codes into the output bytes that are placed in the result string.  The next roadmap stage will then complete normal string data reading functionality by adding the string decoding component, which converts filtered input bytes into entity codes.  In short, a bottom-up model will be used to complete the normal string data reading functionality, where the module closest to output is completed first, and then the module closest to input is added on top of it.
+In this first stage of adding regular string data reading, the focus is on establishing the string encoding component, which converts decoded entity codes into the output bytes that are placed in the result string.  The next roadmap stage will then complete regular string data reading functionality by adding the string decoding component, which converts filtered input bytes into entity codes.  In short, a bottom-up model will be used to complete the regular string data reading functionality, where the module closest to output is completed first, and then the module closest to input is added on top of it.
 
 In order to be able to test the string encoding functionality, this roadmap stage will define the interface of the full string data reader function and add a placeholder for the decoding stage that ignores input and instead just sends a hardwired sequence of entity codes to the string encoding component.  This will allow the testing module to test the string encoding component as if the string decoding component already existed -- in actuality, program input will be ignored and the placeholder decoder will always provide the encoder with a fixed testing sequence of entity codes.
 
-The specific goals of this roadmap stage are therefore to extend the block reader interface with a normal string data reading function; to add a "string" mode to the test_block program, which reads normal string data from input and reports the result to standard output; to implement the string encoding component; and to define a placeholder string decoding component.
+The specific goals of this roadmap stage are therefore to extend the block reader interface with a regular string data reading function; to add a "string" mode to the test_block program, which reads regular string data from input and reports the result to standard output; to implement the string encoding component; and to define a placeholder string decoding component.
 
-In the next stage, all that must be done is to replace the string encoding component placeholder with an actual implementation.  Then normal string data reading will have been successfully added to the block reader.
+In the next stage, all that must be done is to replace the string encoding component placeholder with an actual implementation.  Then regular string data reading will have been successfully added to the block reader.
 
 Once this roadmap stage has been completed, an alpha 0.2.1 release will be made, keeping with the schedule of handling each roadmap stage that builds out the functionality of the block reader as a separate patch release of the 0.2.x series.
 
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [ ] Define the normal string reading interface
+- [ ] Define the regular string reading interface
 - [ ] Extend the block testing program with a string mode
 - [ ] Define a placeholder string decoder function
 - [ ] Define the string encoder, except for output overrides
