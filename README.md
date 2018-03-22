@@ -46,6 +46,12 @@ Sections 5.1 and 5.2 of draft 3V:C4-5 of the Shastina Specification (and possibl
 
 These specifics of implementation should not appear in the specification.  Moreover, libshasm has been written so that the client can choose how to implement these structures, so libshasm is not even bound to these suggestions.
 
+### 2.4 Removal of disallow null flag
+
+Beginning in section 5 of draft 3V:C4-5 of the Shastina Specification, there are references in various sections to a "disallow null" flag, which prevents result strings from including null bytes.  In libshasm, this is handled instead by automatically tracking whether the output buffer contains null bytes or not, and whether it is therefore safe to null terminate it.
+
+The specification should be adjusted to have the presence of null bytes be a property of the result string rather than an encoding mode.
+
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
