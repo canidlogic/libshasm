@@ -42,15 +42,25 @@ The divergence, therefore, is that implementations of Shastina do not necessaril
 
 ### 2.3 Removal of implementation details
 
-Sections 5.1 and 5.2 of draft 3V:C4-5 of the Shastina Specification (and possibly other sections) include references to specific implementation details, such as specifying that the decoding map be implemented by an rtrie or suggesting that the encoding map be handled with a umap.
+In section 5.1 of draft 3V:C4-5 of the Shastina Specification, the decoding map is specified to be provided to Shastina as an rtrie structure.  However, libshasm is more flexible in interface, allowing the client to use any data structure to store the decoding map.
 
-These specifics of implementation should not appear in the specification.  Moreover, libshasm has been written so that the client can choose how to implement these structures, so libshasm is not even bound to these suggestions.
+Similarly, section 5.2 of draft 3V:C4-5 of the Shastina Specification specifies details of how the encoding table is implemented, such as that records should be in ascending order.  libshasm is once again more flexible in interface, allowing the client to use any data structure to store the encoding map.
+
+This divergence, therefore, is that libshasm isn't limited to implementing the decoding and encoding tables with the structures given in the specification.  The specification should be updated to remove these implementation-specific requirements.
 
 ### 2.4 Removal of disallow null flag
 
-Beginning in section 5 of draft 3V:C4-5 of the Shastina Specification, there are references in various sections to a "disallow null" flag, which prevents result strings from including null bytes.  In libshasm, this is handled instead by automatically tracking whether the output buffer contains null bytes or not, and whether it is therefore safe to null terminate it.
+In sections 5.2, 5.3, 5.4, 5.5, and 6.7 of draft 3V:C4-5 of the Shastina Specification, there are references to a "disallow null" flag, which prevents result strings from including null bytes.  This flag is handled as an encoding parameter in the specification.
 
-The specification should be adjusted to have the presence of null bytes be a property of the result string rather than an encoding mode.
+In libshasm, on the other hand, there is no disallow null flag.  Instead, the block reader buffer keeps track of whether a null byte has been written into it as data and therefore whether or not it is safe to null-terminate the string.
+
+The specification should be updated to remove the disallow null flag as an encoding parameter in sections 5.2-5.5, and in section 6.7 to replace the use of disallow null flag encoding parameter with a check after the string reading step to see whether the final string data includes null bytes.
+
+### 2.5 Strict output override mode
+
+libshasm adds a strict flag to be used in conjunction with the output overrides described in section 5.2 of draft 3V:C4-5 of the Shastina Specification.
+
+In the current specification, output overrides always apply to the full Unicode codepoint range of 0x0 through 0x10ffff.  libshasm behaves like the specification if the strict flag is off.  If the strict flag is on, then output overrides only apply to the full Unicode codepoint range excluding the surrogate range, which is handled by the encoding table.
 
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
