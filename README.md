@@ -98,7 +98,7 @@ Once this roadmap stage has been completed, an alpha 0.2.1 release will be made,
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [ ] Define the regular string reading interface
+- [x] Define the regular string reading interface
 - [ ] Extend the block testing program with a string mode
 - [ ] Define a placeholder string decoder function
 - [ ] Define the string encoder, except for output overrides
