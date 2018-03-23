@@ -36,6 +36,125 @@
  * Note that this mode can't fully parse all the tokens in a normal
  * Shastina file because it does not handle interpolated string data.
  * 
+ * string
+ * ------
+ * 
+ * Regular string testing mode is invoked as follows:
+ * 
+ *   test_block string [type] [outover]
+ * 
+ * Both the [type] and [outover] parameters are required.
+ * 
+ * The [type] parameter must be either "q" "a" or "c" (case sensitive)
+ * for double-quoted strings "", apostrophe-quoted strings '', or curly
+ * bracket strings {}, respectively.
+ * 
+ * The [outover] parameter must be either "none", "utf8", "cesu8",
+ * "utf16le", "utf16be", "utf32le", or "utf32be" to select one of the
+ * output overrides or specify that no output override is in effect.  If
+ * an output override is selected, it will be in strict mode.
+ * 
+ * The program reads string data from standard input beginning
+ * immediately with the first byte.  This does not include the opening
+ * quote or curly bracket (which would come at the end of a token
+ * introducing the string data rather than being part of the string
+ * data), but it must include the closing quote or curly bracket.  Zero
+ * or more additional bytes may follow the string data.  However,
+ * nothing may precede the string data in input.
+ * 
+ * The program reports the resulting string that was read from the
+ * string data, with escapes of the form "<0a>" used for characters
+ * outside of US-ASCII printing range (0x21-0x7e).  The program also
+ * reports any additional bytes that were read after the string data,
+ * using the same escaping system for byte values outside of printing
+ * range.  If there was an error, the program reports it.
+ * 
+ * The parameters passed on the command line do not fully specify all of
+ * the details of the string type.  Some of the parameters are hardwired
+ * into the testing program.  The remainder of this testing mode
+ * documentation specifies the hardwired testing parameters.
+ * 
+ * The hardwired decoding map is as follows.  All printing US-ASCII
+ * characters (0x21-0x7e) except for backslash (0x5c), ampersand (0x26),
+ * and asterisk (0x2a) have a decoding map key consisting just of that
+ * character, mapping the character to an entity value of the same
+ * numeric value as the ASCII code.  ASCII Space (0x20) and Line Feed
+ * (0x0a) also have a decoding map key consisting just of that
+ * character, mapping the character to an entity value of the same
+ * numeric value as the ASCII code.
+ * 
+ * There are a set of decoding map keys beginning with the backslash
+ * character, representing escapes.  They are:
+ * 
+ *   \\     - literal backslash
+ *   \&     - literal ampersand
+ *   \"     - literal double quote
+ *   \'     - literal apostrophe
+ *   \{     - literal opening curly bracket
+ *   \}     - literal closing curly bracket
+ *   \n     - literal LF
+ *   \<LF>  - line continuation (see below)
+ *   \:a    - lowercase a-umlaut
+ *   \:A    - uppercase a-umlaut
+ *   \:o    - lowercase o-umlaut
+ *   \:O    - uppercase o-umlaut
+ *   \:u    - lowercase u-umlaut
+ *   \:U    - uppercase u-umlaut
+ *   \ss    - German eszett
+ *   \u#### - Unicode codepoint (see below)
+ * 
+ * The line continuation escape is a backslash as the last character of
+ * a line in the string data.  This maps to the entity code
+ * corresponding to ASCII space.  It allows for line breaks within
+ * string data that only appear as a single space in the output string.
+ * 
+ * The Unicode codepoint escape has four to six base-16 digits (####)
+ * that represent the numeric value of a Unicode codepoint, with
+ * surrogates disallowed but supplemental characters okay.  The opening
+ * "u" is case sensitive, but the base-16 digits can be either uppercase
+ * or lowercase.  This is handled as a numeric escape.
+ * 
+ * All of the other backslash escapes map to an entity code matching the
+ * Unicode/ASCII codepoint of the character they represent.
+ * 
+ * There are also a set of decoding map keys beginning with the
+ * ampersand character, representing escapes.  They are:
+ * 
+ *   &amp;  - literal ampersand
+ *   &###;  - decimal Unicode codepoint (see below)
+ *   &x###; - base-16 Unicode codepoint (see below)
+ * 
+ * The ampersand escape maps to an entity code matching the ASCII code
+ * for an ampersand character.
+ * 
+ * The decimal codepoint escape has one or more decimal digits (###)
+ * terminated with a semicolon, representing the Unicode codepoint, with
+ * surrogates disallowed but supplemental characters okay.
+ * 
+ * The base-16 codepoint escape has one or more base-16 digits (###)
+ * terminated with a semicolon, representing the Unicode codepoint, with
+ * surrogates disallowed but supplemental characters okay.
+ * 
+ * Finally, there are a set of decoding map keys beginning with the
+ * asterisk.  They are:
+ * 
+ *   **                              - literal asterisk
+ *   *                               - special key #1
+ *   *hello                          - special key #2
+ *   *helloWorld                     - special key #3
+ *   *helloEvery                     - special key #4
+ *   *helloEveryone                  - special key #5
+ *   *helloEveryoneOut               - special key #6
+ *   *helloEveryoneOutThere          - special key #7
+ *   *helloEveryoneOutThereSome      - special key #8
+ *   *helloEveryoneOutThereSomewhere - special key #9
+ * 
+ * The literal asterisk key maps to an entity matching the ASCII code
+ * for an asterisk.  Special keys 1-9 map to special entity codes
+ * outside of Unicode range.
+ * 
+ * @@TODO: remaining hardwired testing parameters
+ * 
  * @@TODO: additional testing modes
  * 
  * Compilation
