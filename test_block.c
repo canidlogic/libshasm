@@ -193,9 +193,289 @@
 
 /* @@TODO: additional testing modes */
 
+/*
+ * The long asterisk keys for the decoding map.
+ */
+static const char *m_pLongKey1 = "*helloWorld";
+static const char *m_pLongKey2 = "*helloEveryoneOutThereSomewhere";
+
+/*
+ * Pass-through structure for storing state information for the decoding
+ * map.
+ */
+typedef struct {
+  
+  /*
+   * The key of the current node.
+   * 
+   * This is a null-terminated string.  The empty string is allowed,
+   * meaning the root node.
+   */
+  char key[32];
+  
+} DECMAP_STATE;
+
 /* Function prototypes */
+static int longkey_branch(const char *pKey, int len, int c);
+static void decmap_reset(DECMAP_STATE *pv);
+static int decmap_branch(DECMAP_STATE *pv, int c);
+static long decmap_entity(DECMAP_STATE *pv);
+
+static int esclist_query(
+    void *pCustom,
+    long entity,
+    SHASM_BLOCK_NUMESCAPE *pe);
+
+static long enc_map(
+    void *pCustom,
+    long entity,
+    unsigned char *pBuffer,
+    long buf_len);
+
 static int rawInput(void *pCustom);
 static int test_token(void);
+
+/* @@TODO: implement decmap, esclist, and enc_map functions */
+/* @@TODO: add string testing mode */
+
+/*
+ * Given a long key value, a current key length, and an unsigned byte
+ * value in range 0-255, figure out whether a branch in the long key
+ * corresponding to the unsigned byte value is available.
+ * 
+ * len must be in range zero up to and the length of the string pKey.
+ * 
+ * This function returns non-zero if len is less than the length of the
+ * string pKey and the character at offset len in the string is equal to
+ * c.  Else it returns zero.
+ * 
+ * Parameters:
+ * 
+ *   pKey - the long key to check
+ * 
+ *   len - the current key length
+ * 
+ *   c - the unsigned byte value to find a branch for
+ * 
+ * Return:
+ * 
+ *   non-zero if branch available in this long key, zero if not
+ */
+static int longkey_branch(const char *pKey, int len, int c) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset a decoding map state structure to its initial state.
+ * 
+ * This sets the key to empty, corresponding to the root of the map.
+ * 
+ * Parameters:
+ * 
+ *   pv - the decoding map structure to initialize
+ */
+static void decmap_reset(DECMAP_STATE *pv) {
+  /* Check parameter */
+  if (pv == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pv, 0, sizeof(DECMAP_STATE));
+  pv->key[0] = (char) 0;
+}
+
+/*
+ * Follow a branch in the decoding map, if available.
+ * 
+ * c is the unsigned byte value (0-255) of the branch to follow.  If
+ * such a branch exists from the current node, it will be followed and a
+ * non-zero value returned.  If no such branch exists from the current
+ * node, the position will stay on the current node and zero will be
+ * returned.
+ * 
+ * If the current key is empty, then branches for each printing US-ASCII
+ * character (0x21-0x7e), as well as Space (0x20) and Line Feed (0x0a)
+ * are available.
+ * 
+ * If the current key has length one or greater, then examine the first
+ * character of the key to determine what branches are available.
+ * 
+ * If the first character is neither backslash nor ampersand nor
+ * asterisk, then no branches are available.
+ * 
+ * If the first character is backslash, then the current key length must
+ * be one, two, or three.  If it is three, there are no branches
+ * available.  If it is two and the second character is a colon, then
+ * branches for characters aAoOuU are available.  If it is two and the
+ * second character is s, then a branch for s is available.  If it is
+ * two and the second character is neither colon nor s, then no branches
+ * are available.  If the current key length is one, then branches are
+ * available for \&"'{}n:su as well as for Line Feed.
+ * 
+ * If the first character is ampersand, then the current key length is
+ * from one to five.  If five, then no branches available.  If four,
+ * then a ; branch available.  If three, then a p branch available.  If
+ * two and the second character is a then an m branch available, else no
+ * branches available.  If one then a and x branches are available.
+ * 
+ * If the first character is asterisk, then the current key length is
+ * from one to 31.  If one, then branches for * and h are available.  If
+ * two and second character is h then a branch for e is available, else
+ * no branches are available.  If three to five, then branches available
+ * corresponding to next character in prefix "*hello".  If six, then
+ * branches for W and E available.  If seven to ten and the seventh
+ * character is W then branches available corresponding to next
+ * character in prefix "*helloWorld".  If seven to 30 and the seventh
+ * character is E then branches available corresponding to next
+ * character in prefix "*helloEveryoneOutThereSomewhere".  If 31, then
+ * no branches available.
+ * 
+ * Parameters:
+ * 
+ *   pv - the decoding map structure
+ * 
+ *   c - the unsigned byte value of the branch to follow
+ * 
+ * Return:
+ * 
+ *   non-zero if branch available and followed; zero if no such branch
+ *   and no change in state
+ */
+static int decmap_branch(DECMAP_STATE *pv, int c) {
+  
+  int branch = 0;
+  int keylen = 0;
+  
+  /* Check parameters */
+  if ((pv == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Get length of current key */
+  keylen = (int) strlen(&(pv->key[0]));
+  
+  /* First check whether current key is empty */
+  if (keylen > 0) {
+    /* Current key not empty -- check first character to determine what
+     * to do */
+    if (pv->key[0] == '\\') {
+      /* Backslash is first character -- check current key length */
+      if (keylen == 1) {
+        /* One character in backslash escape -- branches are available
+         * for \&"'{}n:su and line feed */
+        if ((c == '\\') || (c == '&') || (c == '"') || (c == '\'') ||
+            (c == '{' ) || (c == '}') || (c == 'n') || (c == ':' ) ||
+            (c == 's' ) || (c == 'u') || (c == 0xa)) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+        
+      } else if (keylen == 2) {
+        /* Two characters in backslash escape -- check second
+         * character */
+        if (pv->key[1] == ':') {
+          /* Two-character backslash escape and second character is :,
+           * so aAoOuU branches available */
+          if ((c == 'a') || (c == 'A') ||
+              (c == 'o') || (c == 'O') ||
+              (c == 'u') || (c == 'U')) {
+            branch = 1;
+          } else {
+            branch = 0;
+          }
+          
+        } else if (pv->key[1] == 's') {
+          /* Two-character backslash escape and second character is s,
+           * so only an s branch is available */
+          if (c == 's') {
+            branch = 1;
+          } else {
+            branch = 0;
+          }
+          
+        } else {
+          /* Two-character backslash escape and second character is
+           * neither colon nor s, so no further branches */
+          branch = 0;
+        }
+        
+      } else if (keylen == 3) {
+        /* Three characters in backslash escape, so no further branch */
+        branch = 0;
+        
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+      
+    } else if (pv->key[0] == '&') {
+      /* Ampersand is first character -- check current key length */
+      if (keylen == 1) {
+        /* One-character ampersand key -- a and x branches available */
+        if ((c == 'a') || (c == 'x')) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+        
+      } else if (keylen == 2) {
+        /* Two-character ampersand key -- m branch available if second
+         * character is a */
+        if ((pv->key[1] == 'a') && (c == 'm')) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+         
+      } else if (keylen == 3) {
+        /* Three-character ampersand key -- p branch available */
+        if (c == 'p') {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+      
+      } else if (keylen == 4) {
+        /* Four-character ampersand key -- ; branch available */
+        if (c == ';') {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+      
+      } else if (keylen == 5) {
+        /* Five-character ampersand key -- no branches available */
+        branch = 0;
+      
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+      
+      
+    } else if (pv->key[0] == '*') {
+      /* @@TODO: */
+    
+    } else {
+      /* First character neither backslash nor ampersand nor asterisk,
+       * so no branch available */
+      branch = 0;
+    }
+    
+  } else {
+    /* Current key is empty -- branch if provided character in printing
+     * US-ASCII range or space or line feed */
+    if (((c >= 0x20) && (c <= 0x7e)) || (c == 0xa)) {
+      branch = 1;
+    } else {
+      branch = 0;
+    }
+  }
+  
+  /* @@TODO: */
+}
 
 /*
  * Implementation of the raw input callback.
