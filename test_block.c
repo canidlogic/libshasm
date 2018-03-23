@@ -153,7 +153,25 @@
  * for an asterisk.  Special keys 1-9 map to special entity codes
  * outside of Unicode range.
  * 
- * @@TODO: remaining hardwired testing parameters
+ * The numeric escape list string format parameter is defined for the
+ * ampersand and backslash numeric escapes described above.
+ * 
+ * The encoding table is defined such that all entity codes
+ * corresponding printing to US-ASCII characters (0x21-0x7e) generate
+ * the equivalent ASCII codes, except that uppercase letters map to
+ * lowercase letters (thereby making all characters lowercase), and the
+ * tilde character is not defined (meaning it gets dropped from output).
+ * ASCII Space (0x20) and Line Feed (0x0a) are also defined, and map to
+ * their equivalent ASCII codes.  The umlaut characters and eszett
+ * character defined in the backslash escapes are defined and map to
+ * their 8-bit ISO 8859-1 values.  Finally, the special keys are defined
+ * such that they yield a sequence of :-) emoticons with the number of
+ * emoticons in the sequence equal to the number of the special key.
+ * 
+ * If a UTF-16 or UTF-32 output override is in effect, each character in
+ * the special key definitions has padding zeros added in the
+ * appropriate place to make the ASCII characters work in the desired
+ * encoding scheme.
  * 
  * @@TODO: additional testing modes
  * 
