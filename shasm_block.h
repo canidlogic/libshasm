@@ -27,6 +27,11 @@
 #include "shasm_input.h"
 
 /*
+ * Basic definitions
+ * =================
+ */
+
+/*
  * The maximum number of data bytes that can be stored in the block
  * reader buffer, as a signed long constant.
  * 
@@ -106,6 +111,44 @@ struct SHASM_BLOCK_TAG;
 typedef struct SHASM_BLOCK_TAG SHASM_BLOCK;
 
 /*
+ * Decoding map
+ * ============
+ */
+
+/*
+ * Callback type for resetting the decoding map to its initial state.
+ * 
+ * The initial state is the empty string.  The void * parameter is the
+ * pass-through parameter.
+ */
+typedef void (*shasm_block_fp_reset)(void *);
+
+/*
+ * Attempt to branch to another node.
+ * 
+ * The void * parameter is the pass-through parameter.  The int
+ * parameter is an unsigned byte value (0-255) that represents the next
+ * character to branch to.
+ * 
+ * If the decoding map has successfully branched to a new node, return
+ * a non-zero value.  If no branch exists corresponding to the provided
+ * unsigned byte value, stay on the current node and return a zero
+ * value.
+ */
+typedef int (*shasm_block_fp_branch)(void *, int);
+
+/*
+ * Read the entity code associated with the current node.
+ * 
+ * If there is no associated entity code, return a negative value.
+ * Otherwise, a value greater than or equal to zero is interpreted as
+ * an entity code.
+ * 
+ * The void * parameter is the pass-through parameter.
+ */
+typedef long (*shasm_block_fp_entity)(void *);
+
+/*
  * Structure for storing callback information related to the decoding
  * map used during the decoding phase of regular string data processing.
  * 
@@ -138,43 +181,38 @@ typedef struct {
   void *pCustom;
   
   /*
-   * Reset the decoding map to its initial state.
+   * Reset callback.
    * 
-   * The initial state is the empty string.  The void * parameter is the
-   * pCustom field that is passed through.
+   * See the function pointer type for a specification.
    * 
    * This parameter may not be NULL.
    */
-  void (*fpReset)(void *);
+  shasm_block_fp_reset fpReset;
   
   /*
-   * Attempt to branch to another node.
+   * Branch callback.
    * 
-   * The void * parameter is the pCustom field that is passed through.
-   * The int parameter is an unsigned byte value (0-255) that represents
-   * the next character to branch to.
-   * 
-   * If the decoding map has successfully branched to a new node, return
-   * a non-zero value.  If no branch exists corresponding to the
-   * provided unsigned byte value, stay on the current node and return a
-   * zero value.
+   * See the function pointer type for a specification.
    * 
    * This parameter may not be NULL.
    */
-  int (*fpBranch)(void *, int);
+  shasm_block_fp_branch fpBranch;
   
   /*
-   * Read the entity code associated with the current node.
+   * Entity callback.
    * 
-   * If there is no associated entity code, return a negative value.
-   * Otherwise, a value greater than or equal to zero is interpreted as
-   * an entity code.
+   * See the function pointer type for a specification.
    * 
    * This parameter may not be NULL.
    */
-  long (*fpEntity)(void *);
+  shasm_block_fp_entity fpEntity;
   
 } SHASM_BLOCK_DECODER;
+
+/*
+ * Numeric escapes
+ * ===============
+ */
 
 /*
  * Structure representing information about a numeric escape.
@@ -272,6 +310,32 @@ typedef struct {
 } SHASM_BLOCK_NUMESCAPE;
 
 /*
+ * Callback for querying whether an input entity code represents a
+ * numeric escape.
+ * 
+ * The void * is the pass-through parameter.  The long value is the
+ * entity code to check, which must not be negative.
+ * 
+ * If the provided entity code is for the start of a numeric escape,
+ * then the function should fill in information about the numeric
+ * escape in the provided SHASM_BLOCK_NUMESCAPE structure (see that
+ * structure for further information) and return non-zero.
+ * 
+ * In this case, the entity code for the numeric escape is not passed
+ * through to the output encoder.  Instead, the numeric escape will be
+ * decoded and the entity value encoded in the numeric escape will
+ * then be passed through to the output encoder.
+ * 
+ * If the provided entity code is not for the start of a numeric
+ * escape, then the function should return zero and it can ignore the
+ * SHASM_BLOCK_NUMESCAPE parameter.
+ */
+typedef int (*shasm_block_fp_qesc)(
+    void *,
+    long,
+    SHASM_BLOCK_NUMESCAPE *);
+
+/*
  * Structure for storing callback information related to numeric escapes
  * used during the decoding phase of regular string data processing.
  * 
@@ -290,32 +354,65 @@ typedef struct {
   void *pCustom;
   
   /*
-   * Callback for querying whether an input entity code represents a
-   * numeric escape.
+   * Escape query callback.
    * 
-   * The void * is the pCustom parameter that is passed through.  The
-   * long value is the entity code to check, which must not be negative.
-   * 
-   * If the provided entity code is for the start of a numeric escape,
-   * then the function should fill in information about the numeric
-   * escape in the provided SHASM_BLOCK_NUMESCAPE structure (see that
-   * structure for further information) and return non-zero.
-   * 
-   * In this case, the entity code for the numeric escape is not passed
-   * through to the output encoder.  Instead, the numeric escape will be
-   * decoded and the entity value encoded in the numeric escape will
-   * then be passed through to the output encoder.
-   * 
-   * If the provided entity code is not for the start of a numeric
-   * escape, then the function should return zero and it can ignore the
-   * SHASM_BLOCK_NUMESCAPE parameter.
+   * See the function pointer type for a specification.
    * 
    * This function pointer is allowed to be NULL.  In that case, it will
    * be assumed that there are no numeric escapes.
    */
-  int (*fpEscQuery)(void *, long, SHASM_BLOCK_NUMESCAPE *);
+  shasm_block_fp_qesc fpEscQuery;
   
 } SHASM_BLOCK_ESCLIST;
+
+/*
+ * Encoding table
+ * ==============
+ */
+
+/*
+ * Callback for querying the encoding map.
+ * 
+ * The void * parameter is the pass-through parameter.
+ * 
+ * The first long parameter is the entity code key, which must not be a
+ * negative value.
+ * 
+ * The unsigned char * and the second long parameter are a pointer to a
+ * buffer to receive the output sequence of bytes, and the length of 
+ * this buffer in bytes.
+ * 
+ * The return value is the number of output bytes the provided entity
+ * maps to.  It must not be negative.  If it is zero, it means the 
+ * entity has no associated output bytes (or that the entity is not a
+ * recognized key value).  In this case, the output buffer can be
+ * completely ignored.
+ * 
+ * If the return value is greater than zero and less than or equal to
+ * the length of the passed buffer, then the buffer will have been 
+ * filled in with the appropriate output sequence and the return value
+ * determines how many bytes to use.  The output sequence need not be
+ * null terminated, and null bytes are allowed in the output data -- the
+ * return value determines how many bytes in the output buffer are 
+ * actually used.
+ * 
+ * If the return value is greater than the length of the passed buffer,
+ * then it means the buffer wasn't large enough to store the output
+ * bytes.  The output buffer can be completely ignored in this case.
+ * 
+ * It is allowed for the buffer pointer to be NULL and the buffer length
+ * to be zero.  This can be used to check whether a particular key maps
+ * to a non-empty output sequence, and what length of buffer needs to be
+ * allocated to store a particular output sequence.
+ * 
+ * Fetching a particular output sequence might be handled as a loop that
+ * proceeds until the buffer has been expanded enough to fit the output
+ * sequence.  If the callback returns it needs a larger buffer, the
+ * buffer is expanded and the callback is invoked again.  This proceeds
+ * until the query finally works.  This also allows the encoding map to
+ * change as the encoding process goes along.
+ */
+typedef long (*shasm_block_fp_map)(void *, long, unsigned char *, long);
 
 /*
  * Structure for storing callback information related to the encoding
@@ -340,55 +437,22 @@ typedef struct {
   void *pCustom;
   
   /*
-   * Callback for querying the encoding map.
+   * Encoding map callback.
    * 
-   * The void * parameter is the pCustom pass-through parameter.
-   * 
-   * The first long parameter is the entity code key, which must not be
-   * a negative value.
-   * 
-   * The unsigned char * and the second long parameter are a pointer to
-   * a buffer to receive the output sequence of bytes, and the length of
-   * this buffer in bytes.
-   * 
-   * The return value is the number of output bytes the provided entity
-   * maps to.  It must not be negative.  If it is zero, it means the
-   * entity has no associated output bytes (or that the entity is not a
-   * recognized key value).  In this case, the output buffer can be
-   * completely ignored.
-   * 
-   * If the return value is greater than zero and less than or equal to
-   * the length of the passed buffer, then the buffer will have been
-   * filled in with the appropriate output sequence and the return value
-   * determines how many bytes to use.  The output sequence need not be
-   * null terminated, and null bytes are allowed in the output data --
-   * the return value determines how many bytes in the output buffer are
-   * actually used.
-   * 
-   * If the return value is greater than the length of the passed
-   * buffer, then it means the buffer wasn't large enough to store the
-   * output bytes.  The output buffer can be completely ignored in this
-   * case.
-   * 
-   * It is allowed for the buffer pointer to be NULL and the buffer
-   * length to be zero.  This can be used to check whether a particular
-   * key maps to a non-empty output sequence, and what length of buffer
-   * needs to be allocated to store a particular output sequence.
-   * 
-   * Fetching a particular output sequence might be handled as a loop
-   * that proceeds until the buffer has been expanded enough to fit the
-   * output sequence.  If the callback returns it needs a larger buffer,
-   * the buffer is expanded and the callback is invoked again.  This
-   * proceeds until the query finally works.  This also allows the
-   * encoding map to change as the encoding process goes along.
+   * See the function pointer type for a specification.
    * 
    * If this function pointer is NULL, the encoding table is assumed to
    * be empty, with every key mapping to an empty byte sequence.  This
    * could be appropriate if an output override is being used.
    */
-  long (*fpMap)(void *, long, unsigned char *, long);
+  shasm_block_fp_map fpMap;
   
 } SHASM_BLOCK_ENCODER;
+
+/*
+ * String type parameters
+ * ======================
+ */
 
 /*
  * Structure for defining how regular string data is to be read.
@@ -505,6 +569,11 @@ typedef struct {
   int o_strict;
   
 } SHASM_BLOCK_STRING;
+
+/*
+ * Public functions
+ * ================
+ */
 
 /*
  * Allocate a block reader.
