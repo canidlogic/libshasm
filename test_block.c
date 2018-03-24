@@ -194,6 +194,22 @@
 /* @@TODO: additional testing modes */
 
 /*
+ * The special entity codes used in the hardwired decoding map.
+ */
+#define SPECIAL_KEY_1 (0x200001L)   /* Special keys #1-9 */
+#define SPECIAL_KEY_2 (0x200002L)
+#define SPECIAL_KEY_3 (0x200003L)
+#define SPECIAL_KEY_4 (0x200004L)
+#define SPECIAL_KEY_5 (0x200005L)
+#define SPECIAL_KEY_6 (0x200006L)
+#define SPECIAL_KEY_7 (0x200007L)
+#define SPECIAL_KEY_8 (0x200008L)
+#define SPECIAL_KEY_9 (0x200009L)
+#define DEC_ESC (0x200010L)         /* Decimal  &###; escape */
+#define AMP_ESC (0x200011L)         /* Base-16 &x###; escape */
+#define U_ESC   (0x200012L)         /* Base-16 /u#### escape */
+
+/*
  * The long asterisk keys for the decoding map.
  * 
  * This also includes the common *hello prefix
@@ -582,6 +598,47 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
   
   /* Return whether or not a branch was performed */
   return branch;
+}
+
+/*
+ * Determine the entity code associated with the current node in the
+ * decoding map, if there is such an associated entity value.
+ * 
+ * If an associated entity value is present, the return value will be
+ * the entity value, in range zero or greater.  If there is no
+ * associated entity value, the return value will be -1.
+ * 
+ * If the current node has an empty key, there is no associated entity
+ * value.
+ * 
+ * If the current node has a key of length one, then the entity value
+ * will match the value of that lone character if the lone character is
+ * in US-ASCII printing range (0x21-0x7e) plus Space (0x20) and Line
+ * Feed (0xa), but excluding backslash, ampersand, and asterisk.  If the
+ * current node has a key of length one and the lone character is an
+ * asterisk, then the associated entity value is SPECIAL_KEY_1.  If the
+ * current node has a key of length one and the lone character is an
+ * ampersand, then the associated entity value is AMP_ESC.  Otherwise,
+ * a key of length one has no associated entity code.
+ * 
+ * If the current node has a key of length two or greater, then a lookup
+ * will be made of the key value according to the escape sequences
+ * documented for the hardwired decoding map in the documentation for
+ * the "string" testing mode.  Entity codes match the specified Unicode
+ * codepoints, or one of the SPECIAL_KEY constants, or AMP_ESC, DEC_ESC,
+ * or U_ESC.
+ * 
+ * Parameters:
+ * 
+ *   pv - the decoding map structure
+ * 
+ * Return:
+ * 
+ *   the entity code associated with the current node, or -1 if there
+ *   is no associated entity code
+ */
+static long decmap_entity(DECMAP_STATE *pv) {
+  /* @@TODO: */
 }
 
 /*
