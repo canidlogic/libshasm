@@ -278,9 +278,8 @@ static long enc_map(
     long buf_len);
 
 static int rawInput(void *pCustom);
+static int test_string(int stype, int omode);
 static int test_token(void);
-
-/* @@TODO: add string testing mode */
 
 /*
  * Given a long key value, a current key length, and an unsigned byte
@@ -1095,6 +1094,15 @@ static int rawInput(void *pCustom) {
 }
 
 /*
+ * @@TODO:
+ */
+static int test_string(int stype, int omode) {
+  /* @@TODO: */
+  printf("%d %d\n", stype, omode);
+  return 0;
+}
+
+/*
  * Use the block reader to read one or more tokens from standard input,
  * ending with the "|;" token.
  * 
@@ -1197,6 +1205,8 @@ static int test_token(void) {
 int main(int argc, char *argv[]) {
   
   int status = 1;
+  int stype = 0;
+  int omode = 0;
   
   /* Fail if less than one extra argument */
   if (argc < 2) {
@@ -1231,7 +1241,68 @@ int main(int argc, char *argv[]) {
           status = 0;
         }
       }
+    
+    } else if (strcmp(argv[1], "string") == 0) {
+      /* String mode -- make sure two additional parameters */
+      if (argc != 4) {
+        status = 0;
+        fprintf(stderr,
+          "Expecting two additional parameters for string mode!\n");
+      }
       
+      /* Decode string type parameter into stype */
+      if (status) {
+        if (strcmp(argv[2], "q") == 0) {
+          stype = SHASM_BLOCK_STYPE_DQUOTE;
+        
+        } else if (strcmp(argv[2], "a") == 0) {
+          stype = SHASM_BLOCK_STYPE_SQUOTE;
+          
+        } else if (strcmp(argv[2], "c") == 0) {
+          stype = SHASM_BLOCK_STYPE_CURLY;
+          
+        } else {
+          status = 0;
+          fprintf(stderr, "Unrecognized string type parameter!\n");
+        }
+      }
+      
+      /* Decode output override parameter into omode */
+      if (status) {
+        if (strcmp(argv[3], "none") == 0) {
+          omode = SHASM_BLOCK_OMODE_NONE;
+        
+        } else if (strcmp(argv[3], "utf8") == 0) {
+          omode = SHASM_BLOCK_OMODE_UTF8;
+          
+        } else if (strcmp(argv[3], "cesu8") == 0) {
+          omode = SHASM_BLOCK_OMODE_CESU8;
+        
+        } else if (strcmp(argv[3], "utf16le") == 0) {
+          omode = SHASM_BLOCK_OMODE_U16LE;
+        
+        } else if (strcmp(argv[3], "utf16be") == 0) {
+          omode = SHASM_BLOCK_OMODE_U16BE;
+        
+        } else if (strcmp(argv[3], "utf32le") == 0) {
+          omode = SHASM_BLOCK_OMODE_U32LE;
+          
+        } else if (strcmp(argv[3], "utf32be") == 0) {
+          omode = SHASM_BLOCK_OMODE_U32BE;
+          
+        } else {
+          status = 0;
+          fprintf(stderr, "Unrecognized output override parameter!\n");
+        }
+      }
+    
+      /* Invoke string mode */
+      if (status) {
+        if (!test_string(stype, omode)) {
+          status = 0;
+        }
+      }
+    
     } else {
       /* Unrecognized mode */
       status = 0;
