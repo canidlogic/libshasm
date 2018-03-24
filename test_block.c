@@ -618,7 +618,7 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
  * current node has a key of length one and the lone character is an
  * asterisk, then the associated entity value is SPECIAL_KEY_1.  If the
  * current node has a key of length one and the lone character is an
- * ampersand, then the associated entity value is AMP_ESC.  Otherwise,
+ * ampersand, then the associated entity value is DEC_ESC.  Otherwise,
  * a key of length one has no associated entity code.
  * 
  * If the current node has a key of length two or greater, then a lookup
@@ -638,7 +638,130 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
  *   is no associated entity code
  */
 static long decmap_entity(DECMAP_STATE *pv) {
-  /* @@TODO: */
+  
+  long result = 0;
+  
+  /* Check parameter */
+  if (pv == NULL) {
+    abort();
+  }
+  
+  /* Decode the current key */
+  if (strlen(&(pv->key[0])) == 1) {
+    /* Key of length one -- check whether one of the special one-char
+     * keys */
+    if (pv->key[0] == '*') {
+      /* Lone asterisk key -- decode to SPECIAL_KEY_1 */
+      result = SPECIAL_KEY_1;
+    
+    } else if (pv->key[0] == '&') {
+      /* Lone ampersand key -- decode to DEC_ESC */
+      result = DEC_ESC;
+    
+    } else if (((pv->key[0] >= 0x20) && (pv->key[0] <= 0x7e)) ||
+                (pv->key[0] == 0x0a)) {
+      /* Single-char key in US-ASCII printing range, or space or line
+       * feed, and neither the asterisk nor the ampersand -- entity
+       * equals the character value of the lone character */
+      result = pv->key[0];
+    
+    } else {
+      /* Key of length one not recognized -- no entity code */
+      result = -1;
+    }
+    
+  } else {
+    /* Key not of length one -- perform lookups for all the escapes */
+    if (strcmp(pv->key, "\\\\") == 0) {
+      result = '\\';
+    
+    } else if (strcmp(pv->key, "\\&") == 0) {
+      result = '&';
+      
+    } else if (strcmp(pv->key, "\\\"") == 0) {
+      result = '"';
+    
+    } else if (strcmp(pv->key, "\\'") == 0) {
+      result = '\'';
+      
+    } else if (strcmp(pv->key, "\\{") == 0) {
+      result = '{';
+    
+    } else if (strcmp(pv->key, "\\}") == 0) {
+      result = '}';
+      
+    } else if (strcmp(pv->key, "\\n") == 0) {
+      result = '\n';
+      
+    } else if (strcmp(pv->key, "\\\n") == 0) {
+      result = ' ';
+      
+    } else if (strcmp(pv->key, "\\:a") == 0) {
+      result = 0xe4;    /* lowercase a-umlaut */
+    
+    } else if (strcmp(pv->key, "\\:A") == 0) {
+      result = 0xc4;    /* uppercase a-umlaut */
+    
+    } else if (strcmp(pv->key, "\\:o") == 0) {
+      result = 0xf6;    /* lowercase o-umlaut */
+    
+    } else if (strcmp(pv->key, "\\:O") == 0) {
+      result = 0xd6;    /* uppercase o-umlaut */
+    
+    } else if (strcmp(pv->key, "\\:u") == 0) {
+      result = 0xfc;    /* lowercase u-umlaut */
+    
+    } else if (strcmp(pv->key, "\\:U") == 0) {
+      result = 0xdc;    /* uppercase u-umlaut */
+    
+    } else if (strcmp(pv->key, "\\ss") == 0) {
+      result = 0xdf;    /* eszett */
+    
+    } else if (strcmp(pv->key, "\\u") == 0) {
+      result = U_ESC;
+    
+    } else if (strcmp(pv->key, "&amp;") == 0) {
+      result = '&';
+    
+    } else if (strcmp(pv->key, "&x") == 0) {
+      result = AMP_ESC;
+    
+    } else if (strcmp(pv->key, "**") == 0) {
+      result = '*';
+    
+    } else if (strcmp(pv->key, "*hello") == 0) {
+      result = SPECIAL_KEY_2;
+    
+    } else if (strcmp(pv->key, "*helloWorld") == 0) {
+      result = SPECIAL_KEY_3;
+    
+    } else if (strcmp(pv->key, "*helloEvery") == 0) {
+      result = SPECIAL_KEY_4;
+    
+    } else if (strcmp(pv->key, "*helloEveryone") == 0) {
+      result = SPECIAL_KEY_5;
+    
+    } else if (strcmp(pv->key, "*helloEveryoneOut") == 0) {
+      result = SPECIAL_KEY_6;
+    
+    } else if (strcmp(pv->key, "*helloEveryoneOutThere") == 0) {
+      result = SPECIAL_KEY_7;
+    
+    } else if (strcmp(pv->key, "*helloEveryoneOutThereSome") == 0) {
+      result = SPECIAL_KEY_8;
+    
+    } else if (
+        strcmp(pv->key, "*helloEveryoneOutThereSomewhere") == 0) {
+      result = SPECIAL_KEY_9;
+      
+    } else {
+      /* Unrecognized escape */
+      result = -1;
+    }
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
