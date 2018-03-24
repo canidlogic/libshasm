@@ -769,3 +769,14 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
   /* Return status */
   return status;
 }
+
+/*
+ * shasm_block_string function.
+ */
+int shasm_block_string(
+    SHASM_BLOCK *pb,
+    SHASM_IFLSTATE *ps,
+    const SHASM_BLOCK_STRING *sp) {
+  /* @@TODO: placeholder */
+  return 0;
+}

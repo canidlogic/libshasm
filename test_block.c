@@ -1094,12 +1094,175 @@ static int rawInput(void *pCustom) {
 }
 
 /*
- * @@TODO:
+ * Use the block reader to read a regular string from standard input,
+ * and then any data that follows the regular string.
+ * 
+ * See the string mode specification for the details of how this testing
+ * mode works.
+ * 
+ * If an error occurs, this function will report the specifics, along
+ * with the line number it occurred at.
+ * 
+ * A fault occurs if the passed stype or omode parameter is not one of
+ * the recognized libshasm constants.
+ * 
+ * Parameters:
+ * 
+ *   stype - the string type, which should be one of the
+ *   SHASM_BLOCK_STYPE constants
+ * 
+ *   omode - the output override, which should be one of the
+ *   SHASM_BLOCK_OMODE constants
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if error
  */
 static int test_string(int stype, int omode) {
-  /* @@TODO: */
-  printf("%d %d\n", stype, omode);
-  return 0;
+  
+  SHASM_BLOCK_STRING st;
+  DECMAP_STATE ds;
+  ENCMAP_PARAM ep;
+  int status = 1;
+  long lx = 0;
+  int errcode = 0;
+  int c = 0;
+  long count = 0;
+  long i = 0;
+  unsigned char *pc = NULL;
+  SHASM_IFLSTATE *ps = NULL;
+  SHASM_BLOCK *pb = NULL;
+  
+  /* Clear structures */
+  memset(&st, 0, sizeof(SHASM_BLOCK_STRING));
+  memset(&ds, 0, sizeof(DECMAP_STATE));
+  memset(&ep, 0, sizeof(ENCMAP_PARAM));
+  
+  /* Initialize decoding map state */
+  decmap_reset(&ds);
+  
+  /* Set up encoding parameters with default of no padding bytes */
+  ep.padding = 0;
+  ep.suffix = 0;
+  
+  /* For UTF-16 and UTF-32 output overrides, alter the encoding
+   * parameters appropriately */
+  if (omode == SHASM_BLOCK_OMODE_U16LE) {
+    ep.padding = 1;
+    ep.suffix = 1;
+    
+  } else if (omode == SHASM_BLOCK_OMODE_U16BE) {
+    ep.padding = 1;
+    ep.suffix = 0;
+    
+  } else if (omode == SHASM_BLOCK_OMODE_U32LE) {
+    ep.padding = 3;
+    ep.suffix = 1;
+    
+  } else if (omode == SHASM_BLOCK_OMODE_U32BE) {
+    ep.padding = 3;
+    ep.suffix = 0;
+  }
+  
+  /* Set up the string type structure */
+  st.stype = stype;
+  
+  st.dec.pCustom = (void *) &ds;
+  st.dec.fpReset = (shasm_block_fp_reset) &decmap_reset;
+  st.dec.fpBranch = (shasm_block_fp_branch) &decmap_branch;
+  st.dec.fpEntity = (shasm_block_fp_entity) &decmap_entity;
+  
+  st.i_over = SHASM_BLOCK_IMODE_UTF8;
+  
+  st.elist.pCustom = NULL;
+  st.elist.fpEscQuery = (shasm_block_fp_qesc) &esclist_query;
+  
+  st.enc.pCustom = NULL;
+  st.enc.fpMap = (shasm_block_fp_map) &enc_map;
+  
+  st.o_over = omode;
+  st.o_strict = 1;
+  
+  /* Allocate a new input filter chain on standard input */
+  ps = shasm_input_alloc(&rawInput, NULL);
+  
+  /* Allocate a new block reader */
+  pb = shasm_block_alloc();
+  
+  /* Read a regular string */
+  if (!shasm_block_string(pb, ps, &st)) {
+    status = 0;
+    errcode = shasm_block_status(pb, &lx);
+    if (lx != LONG_MAX) {
+      fprintf(stderr, "Error %d at line %ld!\n", errcode, lx);
+    } else {
+      fprintf(stderr, "Error %d at unknown line!\n", errcode);
+    }
+  }
+  
+  /* Report the regular string data that was interpreted */
+  if (status) {
+    /* Get the data pointer and a count */
+    pc = shasm_block_ptr(pb, 0);
+    count = shasm_block_count(pb);
+    
+    /* Print a header */
+    printf("Regular string: ");
+    
+    /* Print each byte of string data */
+    for(i = 0; i < count; i++) {
+      /* Get current byte */
+      c = pc[i];
+      
+      /* Print directly if in printing range or space, else print as
+       * escape sequence */
+      if ((c >= 0x20) && (c <= 0x7e)) {
+        putchar(c);
+      } else {
+        printf("<%02x>", c); 
+      }
+    }
+    
+    /* Two linebreaks */
+    printf("\n\n");
+  }
+  
+  /* Echo all additional data that comes after the string */
+  if (status) {
+    /* Print a header */
+    printf("Remainder data: ");
+    
+    /* Print remaining bytes */
+    for(c = rawInput(NULL); c >= 0; c = rawInput(NULL)) {
+      /* Print directly if in printing range or space, else print as
+       * escape sequence */
+      if ((c >= 0x20) && (c <= 0x7e)) {
+        putchar(c);
+      } else {
+        printf("<%02x>", c);
+      }
+    }
+    
+    /* Linebreak */
+    printf("\n");
+    
+    /* Detect I/O error */
+    if (c == SHASM_INPUT_IOERR) {
+      status = 0;
+      fprintf(stderr, "I/O error!\n");
+    }
+  }
+  
+  /* Free the block reader */
+  shasm_block_free(pb);
+  pb = NULL;
+  
+  /* Free the input filter chain */
+  shasm_input_free(ps);
+  ps = NULL;
+  
+  /* Return status */
+  return status;
 }
 
 /*
