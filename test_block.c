@@ -765,6 +765,89 @@ static long decmap_entity(DECMAP_STATE *pv) {
 }
 
 /*
+ * Query callback implementation for numeric escapes.
+ * 
+ * The custom parameter is ignored.
+ * 
+ * This fills in the numeric escape structure with information about
+ * escapes for entity codes AMP_ESC, DEC_ESC, and U_ESC, returning
+ * non-zero in those cases to indicate the entity code is for a numeric
+ * escape.
+ * 
+ * For all other entity codes, this function returns zero.  The entity
+ * code must not be negative.
+ * 
+ * Parameters:
+ * 
+ *   pCustom - (ignored)
+ * 
+ *   entity - the entity code to check
+ * 
+ *   pe - pointer to the numeric escape information structure to be
+ *   filled in if the provided entity code matches a numeric escape
+ * 
+ * Return:
+ * 
+ *   non-zero if the provided entity code is for a numeric escape and
+ *   the structure was filled in, zero if the provided entity code was
+ *   not for a numeric escape
+ */
+static int esclist_query(
+    void *pCustom,
+    long entity,
+    SHASM_BLOCK_NUMESCAPE *pe) {
+  
+  int result = 0;
+  
+  /* Ignore custom parameter */
+  (void) pCustom;
+  
+  /* Check parameters */
+  if ((entity < 0) || (pe == NULL)) {
+    abort();
+  }
+  
+  /* Check if entity is for a numeric escape */
+  if (entity == DEC_ESC) {
+    /* Decimal ampersand numeric escape */
+    pe->base16 = 0;
+    pe->min_len = 1;
+    pe->max_len = -1;
+    pe->max_entity = 0x10ffffL;
+    pe->block_surrogates = 1;
+    pe->terminal = ';';
+    result = 1;
+    
+  } else if (entity == AMP_ESC) {
+    /* Base-16 ampersand numeric escape */
+    pe->base16 = 1;
+    pe->min_len = 1;
+    pe->max_len = -1;
+    pe->max_entity = 0x10ffffL;
+    pe->block_surrogates = 1;
+    pe->terminal = ';';
+    result = 1;
+    
+  } else if (entity == U_ESC) {
+    /* Backslash u numeric escape */
+    pe->base16 = 1;
+    pe->min_len = 4;
+    pe->max_len = 6;
+    pe->max_entity = 0x10ffffL;
+    pe->block_surrogates = 1;
+    pe->terminal = -1;
+    result = 1;
+    
+  } else {
+    /* Entity not for a numeric escape */
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
  * Implementation of the raw input callback.
  * 
  * Reads the next byte of input from standard input, or SHASM_INPUT_EOF
