@@ -195,9 +195,12 @@
 
 /*
  * The long asterisk keys for the decoding map.
+ * 
+ * This also includes the common *hello prefix
  */
 static const char *m_pLongKey1 = "*helloWorld";
 static const char *m_pLongKey2 = "*helloEveryoneOutThereSomewhere";
+static const char *m_pCommonKey = "*hello";
 
 /*
  * Pass-through structure for storing state information for the decoding
@@ -243,15 +246,19 @@ static int test_token(void);
  * value in range 0-255, figure out whether a branch in the long key
  * corresponding to the unsigned byte value is available.
  * 
- * len must be in range zero up to and the length of the string pKey.
+ * len must be in range zero up to and including the length of the
+ * string pKey.
  * 
  * This function returns non-zero if len is less than the length of the
  * string pKey and the character at offset len in the string is equal to
  * c.  Else it returns zero.
  * 
+ * This function assumes that the length of the long key can fit within
+ * a signed int.  Undefined behavior occurs if this is not the case.
+ * 
  * Parameters:
  * 
- *   pKey - the long key to check
+ *   pKey - the long key to check (null-terminated)
  * 
  *   len - the current key length
  * 
@@ -262,7 +269,42 @@ static int test_token(void);
  *   non-zero if branch available in this long key, zero if not
  */
 static int longkey_branch(const char *pKey, int len, int c) {
-  /* @@TODO: */
+  
+  int result = 0;
+  const unsigned char *pc = NULL;
+  
+  /* Check parameters */
+  if ((pKey == NULL) || (len < 0) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Check that len is in range for the string */
+  if (strlen(pKey) < len) {
+    abort();
+  }
+  
+  /* Recast const char pointer as const unsigned char pointer */
+  pc = (const unsigned char *) pKey;
+  
+  /* Check whether the current key length equals the length of the full
+   * key */
+  if (len < strlen(pKey)) {
+    /* Current key length less than length of the full key, so check
+     * character at offset len to determine whether there is a branch */
+    if (pc[len] == c) {
+      result = 1;
+    } else {
+      result = 0;
+    }
+    
+  } else {
+    /* Current key length equals length of the full key, so no further
+     * branching */
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -355,7 +397,7 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
   /* Get length of current key */
   keylen = (int) strlen(&(pv->key[0]));
   
-  /* First check whether current key is empty */
+  /* Determine whether to branch */
   if (keylen > 0) {
     /* Current key not empty -- check first character to determine what
      * to do */
@@ -456,8 +498,67 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
       
       
     } else if (pv->key[0] == '*') {
-      /* @@TODO: */
-    
+      /* Asterisk is first character -- check current key length */
+      if (keylen == 1) {
+        /* Current key length is 1, so branches for * and h */
+        if ((c == '*') || (c == 'h')) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+        
+      } else if (keylen == 2) {
+        /* Two-character key, so branch for e if second character is
+         * h */
+        if ((pv->key[1] == 'h') && (c == 'e')) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+        
+      } else if ((keylen >= 3) && (keylen <= 5)) {
+        /* Current key length is 3-5, so check for available branch in
+         * the common prefix key */
+        branch = longkey_branch(m_pCommonKey, keylen, c);
+        
+      } else if (keylen == 6) {
+        /* Six-character key, so branches for W and E available */
+        if ((c == 'W') || (c == 'E')) {
+          branch = 1;
+        } else {
+          branch = 0;
+        }
+        
+      } else if ((keylen >= 7) && (keylen <= 11)) {
+        /* Current key length is 7-11, so branches available for one of
+         * the two long keys, depending on the seventh character */
+        if (pv->key[6] == 'W') {
+          /* Check for available branch in first long key */
+          branch = longkey_branch(m_pLongKey1, keylen, c);
+          
+        } else if (pv->key[6] == 'E') {
+          /* Check for available branch in second long key */
+          branch = longkey_branch(m_pLongKey2, keylen, c);
+          
+        } else {
+          /* Shouldn't happen */
+          abort();
+        }
+        
+      } else if ((keylen >= 12) && (keylen <= 30)) {
+        /* Current key length is 12-30, so check for available branch in
+         * the second long key */
+        branch = longkey_branch(m_pLongKey2, keylen, c);
+      
+      } else if (keylen == 31) {
+        /* Current key length is 31, so no branches available */
+        branch = 0;
+      
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+      
     } else {
       /* First character neither backslash nor ampersand nor asterisk,
        * so no branch available */
@@ -474,7 +575,13 @@ static int decmap_branch(DECMAP_STATE *pv, int c) {
     }
   }
   
-  /* @@TODO: */
+  /* If branching, then append character to key */
+  if (branch) {
+    pv->key[keylen] = (unsigned char) c;
+  }
+  
+  /* Return whether or not a branch was performed */
+  return branch;
 }
 
 /*
