@@ -157,7 +157,7 @@
  * ampersand and backslash numeric escapes described above.
  * 
  * The encoding table is defined such that all entity codes
- * corresponding printing to US-ASCII characters (0x21-0x7e) generate
+ * corresponding to printing US-ASCII characters (0x21-0x7e) generate
  * the equivalent ASCII codes, except that uppercase letters map to
  * lowercase letters (thereby making all characters lowercase), and the
  * tilde character is not defined (meaning it gets dropped from output).
@@ -234,6 +234,32 @@ typedef struct {
   
 } DECMAP_STATE;
 
+/*
+ * Pass-through structure for storing parameters for the encoding map.
+ */
+typedef struct {
+  
+  /*
+   * The number of bytes of padding to add to each output byte for the
+   * special keys.
+   * 
+   * This value must be in range 0-3.  Each padding byte will have a
+   * value of zero.
+   */
+  int padding;
+  
+  /*
+   * Flag indicating whether to prefix or suffix the padding bytes to
+   * each output byte for the special keys.
+   * 
+   * If non-zero, the padding bytes will be suffixed to each output
+   * byte.  If zero, the padding bytes will be prefixed to each output
+   * byte.
+   */
+  int suffix;
+  
+} ENCMAP_PARAM;
+
 /* Function prototypes */
 static int longkey_branch(const char *pKey, int len, int c);
 static void decmap_reset(DECMAP_STATE *pv);
@@ -246,7 +272,7 @@ static int esclist_query(
     SHASM_BLOCK_NUMESCAPE *pe);
 
 static long enc_map(
-    void *pCustom,
+    ENCMAP_PARAM *pe,
     long entity,
     unsigned char *pBuffer,
     long buf_len);
@@ -254,7 +280,6 @@ static long enc_map(
 static int rawInput(void *pCustom);
 static int test_token(void);
 
-/* @@TODO: implement decmap, esclist, and enc_map functions */
 /* @@TODO: add string testing mode */
 
 /*
@@ -845,6 +870,191 @@ static int esclist_query(
   
   /* Return result */
   return result;
+}
+
+/*
+ * Encoding map callback implementation.
+ * 
+ * The pass-through structure has the count of padding bytes (which must
+ * be in range 0-3), and a flag indicating whether to prefix or suffix
+ * padding bytes.  The padding bytes are only used for the special keys
+ * (see below).
+ * 
+ * The buf_len parameter indicates the length in bytes of the buffer
+ * indicated by pBuffer.  It may not be negative.  If it is zero,
+ * pBuffer is ignored and may be NULL.  Otherwise, pBuffer must not be
+ * NULL.
+ * 
+ * The entity code provided may not be negative.  The entity code
+ * mappings in the encoding map implemented by this callback are
+ * described below.
+ * 
+ * Entity code 0x0a (Line Feed) maps to 0x0a.  Entity codes 0x20-0x40
+ * map to 0x20-0x40.  Entity codes 0x41-0x5A (uppercase letters) map to
+ * 0x61-0x7a (lowercase letters).  Entity codes 0x5b-0x7d map to the
+ * codes 0x5b-0x7d.  Entity code 0x7e (tilde) is purposefully not
+ * defined, as matches the hardwired encoding table specification given
+ * for "string" testing mode.
+ * 
+ * Also, the following ISO-8859-1 mappings for umlauts and eszett are
+ * defined:
+ * 
+ *   Entity 0xC4 -> 0xC4 (A umlaut)
+ *   Entity 0xD6 -> 0xD6 (O umlaut)
+ *   Entity 0xDC -> 0xDC (U umlaut)
+ *   Entity 0xdf -> 0xdf (eszett)
+ *   Entity 0xe4 -> 0xe4 (a umlaut)
+ *   Entity 0xf6 -> 0xf6 (o umlaut)
+ *   Entity 0xfc -> 0xfc (u umlaut)
+ * 
+ * Finally, there are the mappings for special keys 1-9.  Each mapped
+ * value is a sequence of (n * 3 * (p + 1)) bytes, where n is the
+ * special key number (1-9) and p is the number of padding bytes passed
+ * as a parameter in the ENCMAP_PARAM structure.  The sequences are
+ * filled in with three-character ":-)" sequences.  If the padding byte
+ * count is non-zero, then each character output will have that many
+ * bytes of zero value either prefixed or suffixed to the output byte,
+ * depending on the suffix flag set in the ENCMAP_PARAM structure.
+ * 
+ * The first operation of this function is to determine based on the
+ * entity code how many output bytes there are.  Except for the special
+ * keys, all recognized entity codes will have an output byte count of
+ * one while all unrecognized entity codes will have an output byte
+ * count of zero.  The special keys 1-9 have an output byte count
+ * computed as described above.
+ * 
+ * The second operation of this function is to write the output bytes to
+ * the buffer if the output byte count is non-zero and buf_len is large
+ * enough to fit all the output bytes.  No null termination byte is
+ * written after the output bytes.
+ * 
+ * Finally, the number of the output bytes is returned, regardless of
+ * whether the bytes were written into the buffer.
+ * 
+ * If the provided buffer is not large enough (or it is of zero length),
+ * then this function will return the number of output bytes without
+ * writing them into the buffer.
+ * 
+ * Parameters:
+ * 
+ *   pe - the encoding map parameters
+ * 
+ *   entity - the entity code to query
+ * 
+ *   pBuffer - pointer to buffer to receive output bytes; may be NULL
+ *   only if buf_len is zero
+ * 
+ *   buf_len - the number of bytes in the provided buffer
+ * 
+ * Return:
+ * 
+ *   the number of output bytes for this entity
+ */
+static long enc_map(
+    ENCMAP_PARAM *pe,
+    long entity,
+    unsigned char *pBuffer,
+    long buf_len) {
+  
+  int special_num = 0;
+  int x = 0;
+  int offs = 0;
+  long out_count = 0;
+  
+  /* Check parameters */
+  if ((pe == NULL) || (entity < 0) || (buf_len < 0)) {
+    abort();
+  }
+  if ((buf_len > 0) && (pBuffer == NULL)) {
+    abort();
+  }
+  if ((pe->padding < 0) || (pe->padding > 3)) {
+    abort();
+  }
+  
+  /* If entity code is a special key, set special_num */
+  if (entity == SPECIAL_KEY_1) {
+    special_num = 1;
+  } else if (entity == SPECIAL_KEY_2) {
+    special_num = 2;
+  } else if (entity == SPECIAL_KEY_3) {
+    special_num = 3;
+  } else if (entity == SPECIAL_KEY_4) {
+    special_num = 4;
+  } else if (entity == SPECIAL_KEY_5) {
+    special_num = 5;
+  } else if (entity == SPECIAL_KEY_6) {
+    special_num = 6;
+  } else if (entity == SPECIAL_KEY_7) {
+    special_num = 7;
+  } else if (entity == SPECIAL_KEY_8) {
+    special_num = 8;
+  } else if (entity == SPECIAL_KEY_9) {
+    special_num = 9;
+  }
+  
+  /* Determine how many output bytes there are */
+  if ((entity == 0xa) ||
+      ((entity >= 0x20) && (entity <= 0x7d)) ||
+      (entity == 0xc4) ||
+      (entity == 0xd6) ||
+      (entity == 0xdc) ||
+      (entity == 0xdf) ||
+      (entity == 0xe4) ||
+      (entity == 0xf6) ||
+      (entity == 0xfc)) {
+    out_count = 1;
+  
+  } else if (special_num > 0) {
+    out_count = special_num * 3 * (pe->padding + 1);
+    
+  } else {
+    out_count = 0;
+  }
+  
+  /* Write output bytes to buffer if out_count is non-zero and less than
+   * or equal to buf_len */
+  if ((out_count > 0) && (out_count <= buf_len)) {
+    /* Check whether a special key or not */
+    if (special_num > 0) {
+      /* Special key -- begin by clearing all output bytes to zero so
+       * that all the zero padding bytes are written */
+      memset(pBuffer, 0, (size_t) out_count);
+      
+      /* Write each :-) sequence */
+      for(x = 0; x < special_num; x++) {
+        /* Compute offset in bytes of the sequence start */
+        offs = x * 3 * (pe->padding + 1);
+        
+        /* If prefixing the padding bytes, bump the offset by the number
+         * of padding bytes so that the byte will be written at the end
+         * of the character block */
+        if (!(pe->suffix)) {
+          offs += pe->padding;
+        }
+        
+        /* Write the characters */
+        pBuffer[offs] = (unsigned char) ':';
+        offs += (pe->padding + 1);
+        pBuffer[offs] = (unsigned char) '-';
+        offs += (pe->padding + 1);
+        pBuffer[offs] = (unsigned char) ')';
+      }
+      
+    } else {
+      /* Not a special key -- adjust uppercase letters to lowercase */
+      if ((entity >= 0x41) && (entity <= 0x5a)) {
+        entity += 0x20;
+      }
+      
+      /* After that adjustment, write a single byte equal to the numeric
+       * value of the adjusted entity code */
+      pBuffer[0] = (unsigned char) entity;
+    }
+  }
+  
+  /* Return the number of output bytes */
+  return out_count;
 }
 
 /*
