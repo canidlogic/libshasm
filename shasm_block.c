@@ -891,5 +891,141 @@ int shasm_block_string(
     SHASM_IFLSTATE *ps,
     const SHASM_BLOCK_STRING *sp) {
   /* @@TODO: placeholder */
-  return 0;
+  /*
+   * For the moment, we're going to try to encode the following testing
+   * sequence, which is meant to exercise the encode function:
+   * 
+   *   'H'
+   *   'i'
+   *   '~'
+   *   '$'
+   *       0xA2 (cent sign)
+   *     0x20AC (euro sign)
+   *    0x10348 (gothic letter hwair)
+   *       0xDF (eszett)
+   *       0x0A (line feed)
+   *   0x200005 (special key #5 defined in the test encoding table)
+   *     0xD801 (unpaired surrogate)
+   *    0x10437 (deseret small letter yee)
+   *    0x24B62 (unknown supplemental codepoint)
+   *   '!'
+   * 
+   * Some of the supplemental characters chosen match examples given on
+   * the Wikipedia pages for UTF-8 and UTF-16, such that the example
+   * encodings can be checked against the output of our encoder.
+   */
+  
+  int status = 1;
+  
+  /* Check parameters */
+  if ((pb == NULL) || (ps == NULL) || (sp == NULL)) {
+    abort();
+  }
+  
+  /* Send test entity codes */
+  if (status) {
+    if (!shasm_block_encode(pb, 'H',
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 'i',
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, '~',
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, '$',
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0xA2L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0x20ACL,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0x10348L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0xDFL,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0xAL,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0x200005L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0xD801L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0x10437L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, 0x24B62L,
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  if (status) {
+    if (!shasm_block_encode(pb, '!',
+          &(sp->enc), sp->o_over, sp->o_strict)) {
+      status = 0;
+    }
+  }
+  
+  /* Set error state if error occurred */
+  if (!status) {
+    shasm_block_setbigerr(pb, ps);
+  }
+  
+  /* Return status */
+  return status;
 }
