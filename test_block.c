@@ -959,7 +959,7 @@ static long enc_map(
   int x = 0;
   int offs = 0;
   long out_count = 0;
-  
+
   /* Check parameters */
   if ((pe == NULL) || (entity < 0) || (buf_len < 0)) {
     abort();
@@ -970,7 +970,7 @@ static long enc_map(
   if ((pe->padding < 0) || (pe->padding > 3)) {
     abort();
   }
-  
+
   /* If entity code is a special key, set special_num */
   if (entity == SPECIAL_KEY_1) {
     special_num = 1;
@@ -1177,7 +1177,7 @@ static int test_string(int stype, int omode) {
   st.elist.pCustom = NULL;
   st.elist.fpEscQuery = (shasm_block_fp_qesc) &esclist_query;
   
-  st.enc.pCustom = NULL;
+  st.enc.pCustom = (void *) &ep;
   st.enc.fpMap = (shasm_block_fp_map) &enc_map;
   
   st.o_over = omode;
