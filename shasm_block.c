@@ -479,7 +479,8 @@ static int shasm_block_encode(
     const SHASM_BLOCK_ENCODER *penc,
     int o_over,
     int o_strict) {
-  /* @@TODO: */
+  /* @@TODO: replace placeholder */
+  return shasm_block_addByte(pb, 'a');
 }
 
 /*
