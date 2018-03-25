@@ -51,6 +51,17 @@
 #define SHASM_BLOCK_MAXBUFFER (65536L)
 
 /*
+ * The maximum Unicode codepoint value.
+ */
+#define SHASM_BLOCK_MAXCODE (0x10ffffL)
+
+/*
+ * The minimum and maximum Unicode surrogate codepoints.
+ */
+#define SHASM_BLOCK_MINSURROGATE (0xd800L)
+#define SHASM_BLOCK_MAXSURROGATE (0xdfffL)
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -142,6 +153,13 @@ static void shasm_block_setbigerr(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
 static long shasm_block_adjcap(long v);
 static void shasm_block_clear(SHASM_BLOCK *pb);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
+
+static int shasm_block_encode(
+    SHASM_BLOCK *pb,
+    long entity,
+    const SHASM_BLOCK_ENCODER *penc,
+    int o_over,
+    int o_strict);
 
 /*
  * Set a block reader into an error state.
@@ -368,6 +386,100 @@ static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
   
   /* Return status */
   return status;
+}
+
+/*
+ * Encode an entity value using the regular string method and append the
+ * output bytes to the block reader buffer.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called, this function fails immediately.
+ * 
+ * The given entity code must be zero or greater.
+ * 
+ * The provided encoder callback defines the encoding table that will be
+ * used.  The encoding table defines the mapping of entity codes to
+ * sequences of zero or more output bytes.  Unrecognized entity codes
+ * are mapped to zero-length output byte sequences.
+ * 
+ * o_over must be one of the SHASM_BLOCK_OMODE constants.  They have the
+ * following meanings:
+ * 
+ *   NONE -- the encoding table will be used for all entity codes.  The
+ *   o_strict parameter is ignored.
+ * 
+ *   UTF8 -- entity codes in range zero up to and including
+ *   SHASM_BLOCK_MAXCODE will be output in their UTF-8 encoding,
+ *   ignoring the encoding table for this range of entity codes.  If
+ *   o_strict is non-zero, then the surrogate range is excluded (see
+ *   below).
+ * 
+ *   CESU8 -- same as UTF8, except supplemental codepoints are first
+ *   encoded as a surrogate pair, and then each surrogate is encoded in
+ *   UTF-8.  This is not standard UTF-8, but it is sometimes used when
+ *   full Unicode support is lacking.
+ * 
+ *   U16LE -- entity codes in range zero up to and including
+ *   SHASM_BLOCK_MAXCODE will be output in their UTF-16 encoding, in
+ *   little endian order (least significant byte first).  The encoding
+ *   table is ignored for entity codes in this range.  Supplemental 
+ *   characters are encoded as a surrogate pair, as is standard for
+ *   UTF-16.  If o_strict is non-zero, then the surrogate range is
+ *   excluded (see below).
+ * 
+ *   U16BE -- same as U16LE, except big endian order (most significant
+ *   byte first) is used.
+ * 
+ *   U32LE -- entity codes in range zero up to and including
+ *   SHASM_BLOCK_MAXCODE will be output in their UTF-32 encoding, in
+ *   little endian order (least significant byte first).  The encoding
+ *   table is ignored for entity codes in this range.  If o_strict is
+ *   non-zero, then the surrogate range is excluded (see below).
+ * 
+ *   U32BE -- same as U32LE, except big endian order (most significant
+ *   byte first) is used.
+ * 
+ * For UTF8, CESU8, U16LE, U16BE, U32LE, and U32BE, the o_strict flag
+ * can be used to exclude the surrogate range.  If the o_strict flag is
+ * non-zero for these modes, then entity codes in Unicode surrogate
+ * range (SHASM_BLOCK_MINSURROGATE to SHASM_BLOCK_MAXSURROGATE) will be
+ * handled by the encoding table rather than by the UTF encoder.  If
+ * o_strict is zero for these mdoes, then all entity codes in the range
+ * zero to SHASM_BLOCK_MAXCODE will be handled by the UTF encoder.
+ * 
+ * This function fails if the block reader buffer runs out of space.  In
+ * this case, the block reader buffer state is undefined, and only part
+ * of the output bytecode may have been written.
+ * 
+ * However, this function does *not* set an error state in the block
+ * reader.  This is the caller's responsibility.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   entity - the entity code to encode
+ * 
+ *   penc - the encoding table
+ * 
+ *   o_over - the output override selection
+ * 
+ *   o_strict - non-zero for strict output override mode, zero for loose
+ *   output override mode
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if the block reader was already in an
+ *   error state or this function ran out of space in the block reader
+ *   buffer
+ */
+static int shasm_block_encode(
+    SHASM_BLOCK *pb,
+    long entity,
+    const SHASM_BLOCK_ENCODER *penc,
+    int o_over,
+    int o_strict) {
+  /* @@TODO: */
 }
 
 /*
