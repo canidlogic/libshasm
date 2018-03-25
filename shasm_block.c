@@ -51,6 +51,12 @@
 #define SHASM_BLOCK_MAXBUFFER (65536L)
 
 /*
+ * The initial capacity of a temporary buffer (SHASM_BLOCK_TBUF) in
+ * bytes.
+ */
+#define SHASM_BLOCK_MINTBUF (8)
+
+/*
  * The maximum Unicode codepoint value.
  */
 #define SHASM_BLOCK_MAXCODE (0x10ffffL)
@@ -140,6 +146,29 @@ struct SHASM_BLOCK_TAG {
   
 };
 
+/*
+ * Structure for storing a temporary buffer.
+ * 
+ * Use the shasm_block_tbuf functions to initialize and interact with
+ * this structure.
+ */
+typedef struct {
+  
+  /*
+   * The length of the buffer in bytes.
+   */
+  long len;
+  
+  /*
+   * Pointer to the buffer.
+   * 
+   * This is NULL if len is zero, else it is a dynamically allocated
+   * pointer.
+   */
+  unsigned char *pBuf;
+  
+} SHASM_BLOCK_TBUF;
+
 /* 
  * Local functions
  * ===============
@@ -154,12 +183,18 @@ static long shasm_block_adjcap(long v);
 static void shasm_block_clear(SHASM_BLOCK *pb);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
 
+static void shasm_block_tbuf_init(SHASM_BLOCK_TBUF *pt);
+static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt);
+static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
+static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
+
 static int shasm_block_encode(
     SHASM_BLOCK *pb,
     long entity,
     const SHASM_BLOCK_ENCODER *penc,
     int o_over,
-    int o_strict);
+    int o_strict,
+    SHASM_BLOCK_TBUF *pt);
 
 /*
  * Set a block reader into an error state.
@@ -389,6 +424,193 @@ static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
 }
 
 /*
+ * Initialize a temporary buffer.
+ * 
+ * This initializes the temporary buffer to zero length with no actual
+ * buffer allocated.
+ * 
+ * Do not call this function on a temporary buffer that has already been
+ * initialized or a memory leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pt - the uninitialized temporary buffer to initialize
+ */
+static void shasm_block_tbuf_init(SHASM_BLOCK_TBUF *pt) {
+  /* Check parameter */
+  if (pt == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pt, 0, sizeof(SHASM_BLOCK_TBUF));
+  pt->len = 0;
+  pt->pBuf = NULL;
+}
+
+/*
+ * Reset a temporary buffer.
+ * 
+ * This returns the temporary buffer to zero length, freeing any
+ * dynamically allocated buffer.
+ * 
+ * Undefined behavior occurs if this is called on a temporary buffer
+ * that has not yet been initialized.
+ * 
+ * Parameters:
+ * 
+ *   pt - the initialized temporary buffer to reset
+ */
+static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt) {
+  /* Check parameter */
+  if (pt == NULL) {
+    abort();
+  }
+  
+  /* Free the memory buffer if allocated */
+  if (pt->pBuf != NULL) {
+    free(pt->pBuf);
+    pt->pBuf = NULL;
+  }
+  
+  /* Set the length to zero */
+  pt->len = 0;
+}
+
+/*
+ * Widen a temporary buffer if necessary to be at least the given size.
+ * 
+ * The buffer must have been initialized with shasm_block_tbuf_init or
+ * undefined behavior occurs.  After calling this widening function, the
+ * shasm_block_tbuf_reset function must eventually be called to free the
+ * dynamically allocated buffer.
+ * 
+ * tlen is the number of bytes that the buffer should at least have.  It
+ * must be zero or greater.
+ * 
+ * If tlen is greater than SHASM_BLOCK_MAXBUFFER adjusted by
+ * shasm_block_adjcap, then this function will fail.
+ * 
+ * If the current buffer size is greater than or equal to tlen, then
+ * this function call does nothing.
+ * 
+ * If the current buffer size is zero and tlen is greater than zero,
+ * then the target size will start out at SHASM_BLOCK_MINTBUF.  Else, if
+ * the current buffer size is greater than zero and tlen is greater than
+ * the current buffer size, the target size will start out at the
+ * current size.  The target size is doubled until it is greater than
+ * tlen, with the maximum size clamped at SHASM_BLOCK_MAXBUFFER adjusted
+ * by shasm_block_adjcap.  The buffer is then reallocated to this size
+ * and the function returns successfully.
+ * 
+ * This function will always clear the temporary buffer to all zero
+ * contents, regardless of whether the buffer was actually widened.
+ * 
+ * Parameters:
+ * 
+ *   pt - the temporary buffer to widen if necessary
+ * 
+ *   tlen - the minimum size in bytes
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if requested length was too large
+ */
+static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen) {
+  int status = 1;
+  long tl = 0;
+  
+  /* Check parameters */
+  if ((pt == NULL) || (tlen < 0)) {
+    abort();
+  }
+  
+  /* Fail if requested length exceeds maximum buffer length */
+  if (tlen > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+    status = 0;
+  }
+  
+  /* Only widen if not yet large enough */
+  if (status && (tlen > pt->len)) {
+    
+    /* Start target length at current length */
+    tl = pt->len;
+    
+    /* If target length is zero, expand to initial capacity */
+    if (tl < 1) {
+      tl = SHASM_BLOCK_MINTBUF;
+    }
+    
+    /* Keep doubling until greater than tlen */
+    for( ; tl < tlen; tl *= 2);
+    
+    /* If result is greater than maximum buffer size, shrink to maximum
+     * possible */
+    if (tl > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+      tl = shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER);
+    }
+    
+    /* Set size */
+    pt->len = tl;
+    
+    /* (Re)allocate buffer to new size */
+    if (pt->pBuf == NULL) {
+      pt->pBuf = (unsigned char *) malloc((size_t) pt->len);
+    } else {
+      pt->pBuf = (unsigned char *) realloc(pt->pBuf, (size_t) pt->len);
+    }
+    if (pt->pBuf == NULL) {
+      abort();
+    }
+  }
+  
+  /* If buffer not zero length, clear its contents */
+  if (status && (pt->len > 0)) {
+    memset(pt->pBuf, 0, (size_t) pt->len);
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/* 
+ * Get a pointer to the temporary buffer.
+ * 
+ * Undefined behavior occurs if the temporary buffer has not been
+ * initialized with shasm_block_tbuf_init.
+ * 
+ * Call shasm_block_tbuf_widen with a non-zero value before using this
+ * function.  This function will fault if the buffer length is zero.
+ * The widen function call will guarantee a minimum size supported by
+ * the buffer.
+ * 
+ * The returned pointer is valid until the buffer is widened or reset.
+ * 
+ * Parameters:
+ * 
+ *   pt - the temporary buffer
+ * 
+ * Return:
+ * 
+ *   a non-NULL pointer to the internal buffer
+ */
+static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt) {
+  
+  /* Check parameter */
+  if (pt == NULL) {
+    abort();
+  }
+  
+  /* Check that buffer is not empty */
+  if (pt->len < 1) {
+    abort();
+  }
+  
+  /* Return pointer to internal buffer */
+  return pt->pBuf;
+}
+
+/*
  * Encode an entity value using the regular string method and append the
  * output bytes to the block reader buffer.
  * 
@@ -447,6 +669,11 @@ static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
  * o_strict is zero for these mdoes, then all entity codes in the range
  * zero to SHASM_BLOCK_MAXCODE will be handled by the UTF encoder.
  * 
+ * The temporary buffer must be allocated by the caller and initialized.
+ * This allows the same temporary buffer to be used across multiple
+ * encoding calls for sake of efficiency.  The caller should reset the
+ * temporary buffer when finished to prevent a memory leak.
+ * 
  * This function fails if the block reader buffer runs out of space.  In
  * this case, the block reader buffer state is undefined, and only part
  * of the output bytecode may have been written.
@@ -467,6 +694,8 @@ static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
  *   o_strict - non-zero for strict output override mode, zero for loose
  *   output override mode
  * 
+ *   pt - an initialized temporary buffer
+ * 
  * Return:
  * 
  *   non-zero if successful, zero if the block reader was already in an
@@ -478,12 +707,13 @@ static int shasm_block_encode(
     long entity,
     const SHASM_BLOCK_ENCODER *penc,
     int o_over,
-    int o_strict) {
+    int o_strict,
+    SHASM_BLOCK_TBUF *pt) {
   
   int status = 1;
   
   /* Check parameters, except for o_over */
-  if ((pb == NULL) || (entity < 0) || (penc == NULL)) {
+  if ((pb == NULL) || (entity < 0) || (penc == NULL) || (pt == NULL)) {
     abort();
   }
   
@@ -560,7 +790,7 @@ static int shasm_block_encode(
     }
   }
   
-  /* Return statue */
+  /* Return status */
   return status;
 }
 
@@ -997,6 +1227,10 @@ int shasm_block_string(
    */
   
   int status = 1;
+  SHASM_BLOCK_TBUF tb;
+  
+  /* Initialize buffer */
+  shasm_block_tbuf_init(&tb);
   
   /* Check parameters */
   if ((pb == NULL) || (ps == NULL) || (sp == NULL)) {
@@ -1006,98 +1240,98 @@ int shasm_block_string(
   /* Send test entity codes */
   if (status) {
     if (!shasm_block_encode(pb, 'H',
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 'i',
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, '~',
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, '$',
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0xA2L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0x20ACL,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0x10348L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0xDFL,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0xAL,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0x200005L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0xD801L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0x10437L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, 0x24B62L,
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
   
   if (status) {
     if (!shasm_block_encode(pb, '!',
-          &(sp->enc), sp->o_over, sp->o_strict)) {
+          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
       status = 0;
     }
   }
@@ -1106,6 +1340,9 @@ int shasm_block_string(
   if (!status) {
     shasm_block_setbigerr(pb, ps);
   }
+  
+  /* Reset temporary buffer */
+  shasm_block_tbuf_reset(&tb);
   
   /* Return status */
   return status;
