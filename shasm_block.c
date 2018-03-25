@@ -479,8 +479,89 @@ static int shasm_block_encode(
     const SHASM_BLOCK_ENCODER *penc,
     int o_over,
     int o_strict) {
-  /* @@TODO: replace placeholder */
-  return shasm_block_addByte(pb, 'a');
+  
+  int status = 1;
+  
+  /* Check parameters, except for o_over */
+  if ((pb == NULL) || (entity < 0) || (penc == NULL)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* If entity is outside of Unicode codepoint range, set o_over to
+   * NONE since output overrides are never used outside of that range */
+  if (status && (entity > SHASM_BLOCK_MAXCODE)) {
+    o_over = SHASM_BLOCK_OMODE_NONE;
+  }
+  
+  /* If strict flag is on and entity is in Unicode surrogate range, set
+   * o_over to NONE since output overrides are never used on surrogates
+   * in strict mode */
+  if (status && o_strict &&
+      (entity >= SHASM_BLOCK_MINSURROGATE) &&
+        (entity <= SHASM_BLOCK_MAXSURROGATE)) {
+    o_over = SHASM_BLOCK_OMODE_NONE;
+  }
+  
+  /* o_over now has the actual mode to use for this entity -- dispatch
+   * to appropriate routine */
+  if (status) {
+    switch (o_over) {
+      
+      /* Regular string encoding */
+      case SHASM_BLOCK_OMODE_NONE:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* UTF-8 encoding */
+      case SHASM_BLOCK_OMODE_UTF8:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* CESU-8 encoding */
+      case SHASM_BLOCK_OMODE_CESU8:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* UTF-16 LE encoding */
+      case SHASM_BLOCK_OMODE_U16LE:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* UTF-16 BE encoding */
+      case SHASM_BLOCK_OMODE_U16BE:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* UTF-32 LE encoding */
+      case SHASM_BLOCK_OMODE_U32LE:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* UTF-32 BE encoding */
+      case SHASM_BLOCK_OMODE_U32BE:
+        /* @@TODO: */
+        abort();
+        break;
+      
+      /* Unrecognized mode */
+      default:
+        abort();
+    }
+  }
+  
+  /* Return statue */
+  return status;
 }
 
 /*
