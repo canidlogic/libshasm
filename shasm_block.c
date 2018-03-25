@@ -187,6 +187,13 @@ static void shasm_block_tbuf_init(SHASM_BLOCK_TBUF *pt);
 static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt);
 static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
+static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
+
+static int shasm_block_ereg(
+    SHASM_BLOCK *pb,
+    long entity,
+    const SHASM_BLOCK_ENCODER *penc,
+    SHASM_BLOCK_TBUF *pt);
 
 static int shasm_block_encode(
     SHASM_BLOCK *pb,
@@ -579,10 +586,8 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen) {
  * Undefined behavior occurs if the temporary buffer has not been
  * initialized with shasm_block_tbuf_init.
  * 
- * Call shasm_block_tbuf_widen with a non-zero value before using this
- * function.  This function will fault if the buffer length is zero.
- * The widen function call will guarantee a minimum size supported by
- * the buffer.
+ * If the buffer length is greater than zero, a pointer to the internal
+ * buffer is returned.  Else, NULL is returned.
  * 
  * The returned pointer is valid until the buffer is widened or reset.
  * 
@@ -592,7 +597,8 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen) {
  * 
  * Return:
  * 
- *   a non-NULL pointer to the internal buffer
+ *   a pointer to the internal buffer, or NULL if the buffer is zero
+ *   length
  */
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt) {
   
@@ -601,13 +607,140 @@ static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt) {
     abort();
   }
   
-  /* Check that buffer is not empty */
-  if (pt->len < 1) {
+  /* Return pointer to internal buffer or NULL */
+  return pt->pBuf;
+}
+
+/*
+ * Return the current length of the temporary buffer in bytes.
+ * 
+ * The temporary buffer must have been initialized with
+ * shasm_block_tbuf_init or undefined behavior occurs.
+ * 
+ * Parameters:
+ * 
+ *   pt - the temporary buffer to query
+ * 
+ * Return:
+ * 
+ *   the length of the temporary buffer in bytes
+ */
+static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
+  
+  /* Check parameter */
+  if (pt == NULL) {
     abort();
   }
   
-  /* Return pointer to internal buffer */
-  return pt->pBuf;
+  /* Return length */
+  return pt->len;
+}
+
+/*
+ * Encode an entity value with an encoding table and append the output
+ * bytes to the block reader buffer.
+ * 
+ * This function does not account for output overrides.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called, this function fails immediately.
+ * 
+ * The given entity code must be zero or greater.
+ * 
+ * The provided encoder callback defines the encoding table that will be
+ * used.  The encoding table defines the mapping of entity codes to
+ * sequences of zero or more output bytes.  Unrecognized entity codes
+ * are mapped to zero-length output byte sequences.
+ * 
+ * The temporary buffer must be allocated by the caller and initialized.
+ * This allows the same temporary buffer to be used across multiple
+ * encoding calls for sake of efficiency.  The caller should reset the
+ * temporary buffer when finished to prevent a memory leak.
+ * 
+ * This function fails if the block reader buffer runs out of space.  In
+ * this case, the block reader buffer state is undefined, and only part
+ * of the output bytecode may have been written.
+ * 
+ * However, this function does *not* set an error state in the block
+ * reader.  This is the caller's responsibility.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   entity - the entity code to encode
+ * 
+ *   penc - the encoding table
+ * 
+ *   pt - an initialized temporary buffer
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if the block reader was already in an
+ *   error state or this function ran out of space in the block reader
+ *   buffer
+ */
+static int shasm_block_ereg(
+    SHASM_BLOCK *pb,
+    long entity,
+    const SHASM_BLOCK_ENCODER *penc,
+    SHASM_BLOCK_TBUF *pt) {
+  
+  int status = 1;
+  long lv = 0;
+  long x = 0;
+  unsigned char *pc = NULL;
+  
+  /* Check parameters */
+  if ((pb == NULL) || (entity < 0) || (penc == NULL) || (pt == NULL)) {
+    abort();
+  }
+  
+  /* Check that encoder pointer is defined */
+  if (penc->fpMap == NULL) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Call the mapping function until the code has been read into the
+   * temporary buffer with lv as the length of the code */
+  while (status) {
+
+    /* Try to map entity with current temporary buffer */
+    lv = (*(penc->fpMap))(
+            penc->pCustom,
+            entity,
+            shasm_block_tbuf_ptr(pt),
+            shasm_block_tbuf_len(pt));
+
+    /* If the temporary buffer was large enough, break from the loop */
+    if (shasm_block_tbuf_len(pt) >= lv) {
+      break;
+    }
+    
+    /* Buffer wasn't large enough, so widen it before trying again */
+    if (!shasm_block_tbuf_widen(pt, lv)) {
+      status = 0;
+    }
+  }
+  
+  /* Write each byte to the buffer */
+  if (status) {
+    pc = shasm_block_tbuf_ptr(pt);
+    for(x = 0; x < lv; x++) {
+      if (!shasm_block_addByte(pb, pc[x])) {
+        status = 0;
+        break;
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -744,8 +877,9 @@ static int shasm_block_encode(
       
       /* Regular string encoding */
       case SHASM_BLOCK_OMODE_NONE:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_ereg(pb, entity, penc, pt)) {
+          status = 0;
+        }
         break;
       
       /* UTF-8 encoding */
