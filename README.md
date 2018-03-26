@@ -30,15 +30,25 @@ The line unghosting filter discards whitespace sequences consisting of SP and HT
 
 With the caveat that the tab unghosting filter may change the alignment of text in certain circumstances, the tab and line unghosting filter sequence should have the same effect as the original unghosting filter, while being much easier to implement.
 
-### 2.2 Maximum block and string length
+### 2.2 Maximum length and register limit changes
 
-Section 5.5 and a few other sections of draft 3V:C4-5 of the Shastina Specification establish a limit of 65,535 bytes as the maximum length of decoded string literals.  libshasm works according to this specification, except when the size_t is less than 32-bit or the implementation constant SHASM_BLOCK_MAXBUFFER has been adjusted in the block reader implementation.  In these cases, there is an implementation limit on strings that is lower than 65,535 bytes.
+Draft 3V:C4-5 of the Shasinta Specification has a number of limits depending on an unsigned 16-bit maximum of 65,535.  It turns out that it is much more portable and easier to implement libshasm if these limits are reduced a bit.  This section documents all the specific limit changes that libshasm makes, diverging from draft 3V:C4-5 of the specification.
 
-If size_t is less than 32-bit but SHASM_BLOCK_MAXBUFFER has not been adjusted, then this lower implementation limit on string length is 65,534 bytes, which is just one byte shy of the specification.  However, if SHASM_BLOCK_MAXBUFFER is adjusted down, this limit may be significantly lower.  libshasm distinguishes between the specification limit and the implementation limit by raising SHASM_ERR_HUGEBLOCK if the specification limit has been exceeded or SHASM_ERR_LARGEBLOCK if the implementation-specific lower limit has been exceeded -- see the documentation of those errors for further information.
+(1) In sections 5.3, 5.4, 5.5, and 6.3, change the 65,535-byte string and block limit to 32,766 bytes.  This is two bytes shy of 32 kilobytes, which allows the maximum length including a terminating null byte to be stored in a signed 16-bit value.
 
-The divergence, therefore, is that implementations of Shastina do not necessarily support the full 65,535-byte string length.  An updated draft of the specification should set a minimum implementation limit and say that the actual limit is somewhere between this minimum implementation limit and 65,535.  The documentation within the libshasm sources can then be clarified.
+(2) In section 5.5, change the example calculations to take into account the new 32,766-byte limit.
 
-(On further thought, it might be better to leave the 65,535-byte limit as it is in the specification and drop support for environments with less than 32-bit size_t values in the libshasm implementation.  This matter will be brought up again when revising the Shastina Specification.)
+(3) In section 4, add a maximum token length limit of 32,766 bytes.
+
+(4) In section 5, note that the maximum length of the final string literal is 32,766 bytes.
+
+(5) In section 5.1, note that the length limit of 32,766 bytes on the final string literal does not apply to the size of the string data on input.  All that matters is the size of the final output.
+
+(6) In section 5.2, document the maximum string literal length limit of 32,766 bytes.
+
+(7) In section 6.6, change the maximum register index to 32,767 so it can be stored in a signed 16-bit integer.
+
+(8) In section 6.7, change the maximum size of all metacommand parameter data including terminating nulls to 32,767 bytes.
 
 ### 2.3 Removal of implementation details
 
