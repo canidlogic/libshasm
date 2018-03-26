@@ -19,9 +19,6 @@
  * 
  * This value must be at least two, and not be greater than
  * SHASM_BLOCK_MAXBUFFER.
- * 
- * This module will run this value through shasm_block_adjcap to limit
- * it to 65535 on platforms where size_t is less than 32-bit.
  */
 #define SHASM_BLOCK_MINBUFFER (32L)
 
@@ -31,28 +28,21 @@
  * 
  * This includes space for the terminating null character.  Blocks may
  * be no longer than one less than this value in length.  Since the
- * maximum block size supported by Shastina is 65,535 bytes, this value
+ * maximum block size supported by Shastina is 32,766 bytes, this value
  * is one greater than that.
  * 
  * This value must not be less than SHASM_BLOCK_MINBUFFER.  It must also
  * be less than half of LONG_MAX, so that doubling the capacity never
  * results in overflow.
- * 
- * This module will run this value through shasm_block_adjcap to limit
- * it to 65535 on platforms where size_t is less than 32-bit.  In this
- * case, the maximum block size supported by libshasm will be 65,534
- * bytes, which is one byte shy of the specification.
- * 
- * On platforms with a 16-bit size_t, it may be a good idea to adjust
- * this value down to avoid memory allocation faults.  But note that
- * adjusting this value down will diverge from the specification by not
- * supporting the full 65,535-byte size of strings.
  */
-#define SHASM_BLOCK_MAXBUFFER (65536L)
+#define SHASM_BLOCK_MAXBUFFER (32767L)
 
 /*
  * The initial capacity of a temporary buffer (SHASM_BLOCK_TBUF) in
  * bytes.
+ * 
+ * This value must be at least one, and not be greater than 
+ * SHASM_BLOCK_MAXBUFFER.
  */
 #define SHASM_BLOCK_MINTBUF (8)
 
@@ -103,10 +93,9 @@ struct SHASM_BLOCK_TAG {
    * The capacity of the allocated buffer in bytes.
    * 
    * This includes space for a terminating null character.  The buffer
-   * starts out allocated at a capacity of SHASM_BLOCK_MINBUFFER, run
-   * through the shasm_block_adjcap function.  It grows by doubling as
-   * necessary, to a maximum of SHASM_BLOCK_MAXBUFFER, run through the
-   * shasm_block_adjcap function.
+   * starts out allocated at a capacity of SHASM_BLOCK_MINBUFFER.  It
+   * grows by doubling as necessary, to a maximum capacity value of
+   * SHASM_BLOCK_MAXBUFFER.
    */
   long buf_cap;
   
@@ -178,8 +167,6 @@ static void shasm_block_seterr(
     SHASM_BLOCK *pb,
     SHASM_IFLSTATE *ps,
     int code);
-static void shasm_block_setbigerr(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
-static long shasm_block_adjcap(long v);
 static void shasm_block_clear(SHASM_BLOCK *pb);
 static int shasm_block_addByte(SHASM_BLOCK *pb, int c);
 
@@ -243,82 +230,6 @@ static void shasm_block_seterr(
     pb->code = code;
     pb->line = shasm_input_count(ps);
   }
-}
-
-/*
- * Wrapper function for shasm_block_seterr that sets either the error
- * SHASM_ERR_HUGEBLOCK or SHASM_ERR_LARGEBLOCK.
- * 
- * HUGEBLOCK is set if the adjusted constant SHASM_BLOCK_MAXBUFFER is
- * greater than SHASM_BLOCK_MAXSTR (greater than to account for space
- * for terminating null).  LARGEBLOCK is set otherwise.
- * 
- * This function determines the appropriate error and calls through to
- * shasm_block_seterr with it.
- * 
- * Parameters:
- * 
- *   pb - the block reader to set to error state
- * 
- *   ps - the input filter chain to query for the line number
- */
-static void shasm_block_setbigerr(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
-  if (shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER) > SHASM_BLOCK_MAXSTR) {
-    shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
-  } else {
-    shasm_block_seterr(pb, ps, SHASM_ERR_LARGEBLOCK);
-  }
-}
-
-/*
- * Adjust a capacity constant if necessary for the current platform.
- * 
- * The SHASM_BLOCK_MINBUFFER and SHASM_BLOCK_MAXBUFFER constants are run
- * through this function before actually being used.
- * 
- * If sizeof(size_t) is four or greater, then this function simply
- * returns the value that was passed to it as-is.
- * 
- * If sizeof(size_t) is two or three, then this function returns the
- * minimum of the passed value and 65,535.
- * 
- * If sizeof(size_t) is less than two, a fault occurs.
- * 
- * This function has the effect of limiting buffer capacity to 65,535
- * bytes on platforms with less than a 32-bit size_t value.  (It also
- * verifies that size_t is at least 16-bit, faulting if this is not the
- * case.)
- * 
- * The passed capacity value must be greater than one or a fault occurs.
- * 
- * Parameters:
- * 
- *   v - the capacity value to adjust
- * 
- * Return:
- * 
- *   the adjusted capacity value
- */
-static long shasm_block_adjcap(long v) {
-  
-  /* Check parameter */
-  if (v <= 1) {
-    abort();
-  }
-  
-  /* Adjust if necessary depending of size_t size */
-  if ((sizeof(size_t) < 4) && (sizeof(size_t) >= 2)) {
-    /* Less than 32-bit but at least 16-bit size_t */
-    if (v > 65535L) {
-      v = 65535L;
-    }
-  } else if (sizeof(size_t) < 2) {
-    /* Less than 16-bit size_t -- not supported */
-    abort();
-  }
-  
-  /* Return value, possibly adjusted */
-  return v;
 }
 
 /*
@@ -386,17 +297,17 @@ static int shasm_block_addByte(SHASM_BLOCK *pb, int c) {
    * increased -- the "one less" is to account for the terminating
    * null */
   if (status && (pb->buf_len >= pb->buf_cap - 1)) {
-    /* If buffer capacity already at adjusted maximum capacity, fail */
-    if (pb->buf_len >= shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+    /* If buffer capacity already at maximum capacity, fail */
+    if (pb->buf_len >= SHASM_BLOCK_MAXBUFFER) {
       status = 0;
     }
     
     /* Room to grow still -- new capacity is minimum of double the
-     * current capacity and the adjusted maximum capacity */
+     * current capacity and the maximum capacity */
     if (status) {
       pb->buf_cap *= 2;
-      if (pb->buf_cap > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
-        pb->buf_cap = shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER);
+      if (pb->buf_cap > SHASM_BLOCK_MAXBUFFER) {
+        pb->buf_cap = SHASM_BLOCK_MAXBUFFER;
       }
     }
     
@@ -495,8 +406,8 @@ static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt) {
  * tlen is the number of bytes that the buffer should at least have.  It
  * must be zero or greater.
  * 
- * If tlen is greater than SHASM_BLOCK_MAXBUFFER adjusted by
- * shasm_block_adjcap, then this function will fail.
+ * If tlen is greater than SHASM_BLOCK_MAXBUFFER, then this function
+ * will fail.
  * 
  * If the current buffer size is greater than or equal to tlen, then
  * this function call does nothing.
@@ -506,9 +417,9 @@ static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt) {
  * the current buffer size is greater than zero and tlen is greater than
  * the current buffer size, the target size will start out at the
  * current size.  The target size is doubled until it is greater than
- * tlen, with the maximum size clamped at SHASM_BLOCK_MAXBUFFER adjusted
- * by shasm_block_adjcap.  The buffer is then reallocated to this size
- * and the function returns successfully.
+ * tlen, with the maximum size clamped at SHASM_BLOCK_MAXBUFFER.  The
+ * buffer is then reallocated to this size and the function returns
+ * successfully.
  * 
  * This function will always clear the temporary buffer to all zero
  * contents, regardless of whether the buffer was actually widened.
@@ -533,7 +444,7 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen) {
   }
   
   /* Fail if requested length exceeds maximum buffer length */
-  if (tlen > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
+  if (tlen > SHASM_BLOCK_MAXBUFFER) {
     status = 0;
   }
   
@@ -553,8 +464,8 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen) {
     
     /* If result is greater than maximum buffer size, shrink to maximum
      * possible */
-    if (tl > shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER)) {
-      tl = shasm_block_adjcap(SHASM_BLOCK_MAXBUFFER);
+    if (tl > SHASM_BLOCK_MAXBUFFER) {
+      tl = SHASM_BLOCK_MAXBUFFER;
     }
     
     /* Set size */
@@ -953,7 +864,7 @@ SHASM_BLOCK *shasm_block_alloc(void) {
   /* Initialize fields */
   pb->code = SHASM_OKAY;
   pb->line = 1;
-  pb->buf_cap = shasm_block_adjcap(SHASM_BLOCK_MINBUFFER);
+  pb->buf_cap = SHASM_BLOCK_MINBUFFER;
   pb->buf_len = 0;
   pb->null_present = 0;
   pb->pBuf = NULL;
@@ -1202,7 +1113,7 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
     if (status) {
       if (!shasm_block_addByte(pb, c)) {
         status = 0;
-        shasm_block_setbigerr(pb, ps);
+        shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
       }
     }
   }
@@ -1230,7 +1141,7 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
       /* Semicolon -- add it to buffer */
       if (!shasm_block_addByte(pb, c)) {
         status = 0;
-        shasm_block_setbigerr(pb, ps);
+        shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
       }
       
     } else {
@@ -1301,7 +1212,7 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
       if (status) {
         if (!shasm_block_addByte(pb, c)) {
           status = 0;
-          shasm_block_setbigerr(pb, ps);
+          shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
         }
       }
     }
@@ -1315,7 +1226,7 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps) {
       /* Inclusive stop character -- add to buffer */
       if (!shasm_block_addByte(pb, c)) {
         status = 0;
-        shasm_block_setbigerr(pb, ps);
+        shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
       }
       
     } else if (status) {
@@ -1472,7 +1383,7 @@ int shasm_block_string(
   
   /* Set error state if error occurred */
   if (!status) {
-    shasm_block_setbigerr(pb, ps);
+    shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
   }
   
   /* Reset temporary buffer */

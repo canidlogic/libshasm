@@ -7,16 +7,10 @@
  * Block reader module of libshasm.
  * 
  * This module converts a filtered stream of characters from shasm_input
- * into strings of zero to 65,535 bytes.
+ * into strings of zero to 32,766 bytes.
  * 
- * On platforms where sizeof(size_t) is two bytes, this module will
- * limit the total string size to 65,534 bytes so that the buffer
- * capacity never goes beyond 65,535 bytes (the maximum unsigned 16-bit
- * value), which includes space for the terminating null.  A fault will
- * occur if this module is invoked on platforms where sizeof(size_t) is
- * less than two bytes.  On 16-bit platforms, see in the implementation
- * file the SHASM_BLOCK_MAXBUFFER constant, which may need to be
- * adjusted to prevent memory faults.
+ * Undefined behavior occurs if the platform's size_t has a maximum
+ * value less than 32,767.
  * 
  * For multithreaded applications, this module is safe to use, provided
  * that each SHASM_BLOCK instance is only used from one thread at a 
@@ -37,7 +31,7 @@
  * 
  * This does not include a terminating null.
  */
-#define SHASM_BLOCK_MAXSTR (65535L)
+#define SHASM_BLOCK_MAXSTR (32766L)
 
 /*
  * Constants for the types of regular strings.
@@ -634,7 +628,7 @@ int shasm_block_status(SHASM_BLOCK *pb, long *pLine);
  * 
  * After a successful block reading function, this will be the number of
  * bytes in the result string that has been read into the buffer.  The
- * range is zero up to and including SHASM_BLOCK_MAXSTR (65,535).  This
+ * range is zero up to and including SHASM_BLOCK_MAXSTR (32,766).  This
  * does not include a terminating null character.
  * 
  * Parameters:
@@ -767,9 +761,7 @@ long shasm_block_line(SHASM_BLOCK *pb);
  * 
  * (3) If EOF is encountered, SHASM_ERR_EOF.
  * 
- * (4) If the token is too long to fit in the buffer, either the error
- * SHASM_ERR_HUGEBLOCK or the error SHASM_ERR_LARGEBLOCK.  See the
- * documentation of those errors for the difference.
+ * (4) If the token is more than 32,766 bytes, SHASM_ERR_HUGEBLOCK.
  * 
  * (5) If a filtered character that is not in US-ASCII printing range
  * (0x21-0x7e) and not HT SP or LF is encountered, SHASM_ERR_TOKENCHAR,
@@ -876,9 +868,8 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
  * 
  * (3) If EOF is encountered, SHASM_ERR_EOF.
  * 
- * (4) If the token is too long to fit in the buffer, either the error
- * SHASM_ERR_HUGEBLOCK or the error SHASM_ERR_LARGEBLOCK.  See the
- * documentation of those errors for the difference.
+ * (4) If the result string literal is more than 32,766 bytes long,
+ * SHASM_ERR_HUGEBLOCK.
  * 
  * (5) If a filtered byte of string data can't be decoded, the error
  * SHASM_ERR_STRINGCHAR occurs.
