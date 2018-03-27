@@ -112,7 +112,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Extend the block testing program with a string mode
 - [x] Define a placeholder string decoder function
 - [x] Define the string encoder, except for output overrides
-- [ ] Add UTF-8 and CESU-8 output overrides
+- [x] Add UTF-8 and CESU-8 output overrides
 - [ ] Add UTF-16 little and big endian overrides
 - [ ] Add UTF-32 little and big endian overrides
 
