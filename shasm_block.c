@@ -58,6 +58,38 @@
 #define SHASM_BLOCK_MAXSURROGATE (0xdfffL)
 
 /*
+ * The first high surrogate and the first low surrogate codepoints.
+ * 
+ * The high surrogate encodes the ten most significant bits of the
+ * supplemental offset and comes first in the pair, while the low
+ * surrogate encodes the ten least significant bits of the supplemental
+ * offset and comes second in the pair.
+ */
+#define SHASM_BLOCK_HISURROGATE (0xd800L)
+#define SHASM_BLOCK_LOSURROGATE (0xdc00L)
+
+/*
+ * The minimum Unicode codepoint that is in supplemental range.
+ */
+#define SHASM_BLOCK_MINSUPPLEMENTAL (0x10000L)
+
+/*
+ * The minimum codepoints for which 2-byte, 3-byte, and 4-byte UTF-8
+ * encodings are used.
+ */
+#define SHASM_BLOCK_UTF8_2BYTE (0x80L)
+#define SHASM_BLOCK_UTF8_3BYTE (0x800L)
+#define SHASM_BLOCK_UTF8_4BYTE (0x10000L)
+
+/*
+ * The leading byte masks for 2-byte, 3-byte, and 4-byte UTF-8
+ * encodings.
+ */
+#define SHASM_BLOCK_UTF8_2MASK (0xC0)
+#define SHASM_BLOCK_UTF8_3MASK (0xE0)
+#define SHASM_BLOCK_UTF8_4MASK (0XF0)
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -176,11 +208,15 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
 static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
 
+static void shasm_block_pair(long code, long *pHi, long *pLo);
+
 static int shasm_block_ereg(
     SHASM_BLOCK *pb,
     long entity,
     const SHASM_BLOCK_ENCODER *penc,
     SHASM_BLOCK_TBUF *pt);
+
+static int shasm_block_utf8(SHASM_BLOCK *pb, long entity, int cesu8);
 
 static int shasm_block_encode(
     SHASM_BLOCK *pb,
@@ -548,6 +584,57 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
 }
 
 /*
+ * Encode a supplemental Unicode codepoint into a Surrogate pair.
+ * 
+ * The provided code must be in range SHASM_BLOCK_MINSUPPLEMENTAL up to
+ * and including SHASM_BLOCK_MAXCODE.
+ * 
+ * The provided pointers must not be NULL, and they must not be equal to
+ * each other.
+ * 
+ * To compute the surrogates, first determine the supplemental offset by
+ * subtracting SHASM_BLOCK_MINSUPPLEMENTAL from the provided code.
+ * 
+ * Add the ten most significant bits of the supplemental offset to
+ * SHASM_BLOCK_HISURROGATE to get the high surrogate.  Add the ten least
+ * significant bits of the supplemental offset to the constant
+ * SHASM_BLOCK_LOSURROGATE to get the low surrogate.
+ * 
+ * The high surrogate should appear before the low surrogate in the
+ * output.
+ * 
+ * Parameters:
+ * 
+ *   code - the supplemental codepoint
+ * 
+ *   pHi - pointer to the long to receive the high surrogate
+ * 
+ *   pLo - pointer to the long to receive the low surrogate
+ */
+static void shasm_block_pair(long code, long *pHi, long *pLo) {
+  
+  long offs = 0;
+  
+  /* Check parameters */
+  if ((code < SHASM_BLOCK_MINSUPPLEMENTAL) ||
+      (code > SHASM_BLOCK_MAXCODE) ||
+      (pHi == NULL) || (pLo == NULL) || (pHi == pLo)) {
+    abort();
+  }
+  
+  /* Get supplemental offset */
+  offs = code - SHASM_BLOCK_MINSUPPLEMENTAL;
+  
+  /* Split offset into low and high surrogates */
+  *pLo = offs & 0x3ffL;
+  *pHi = (offs >> 10) & 0x3ffL;
+  
+  /* Add the surrogate offsets */
+  *pLo += SHASM_BLOCK_LOSURROGATE;
+  *pHi += SHASM_BLOCK_HISURROGATE;
+}
+
+/*
  * Encode an entity value with an encoding table and append the output
  * bytes to the block reader buffer.
  * 
@@ -644,6 +731,190 @@ static int shasm_block_ereg(
     pc = shasm_block_tbuf_ptr(pt);
     for(x = 0; x < lv; x++) {
       if (!shasm_block_addByte(pb, pc[x])) {
+        status = 0;
+        break;
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Encode an entity value according to the UTF-8 or CESU-8 encoding
+ * systems and append the output bytes to the block reader buffer.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called, this function fails immediately.
+ * 
+ * The given entity code must be in range zero up to and including
+ * SHASM_BLOCK_MAXCODE.  Surrogates are allowed, and will just be
+ * encoded like any other codepoint.
+ * 
+ * If cesu8 is zero, then supplemental characters will be encoded
+ * directly in UTF-8, which is standard.  If cesu8 is non-zero, then
+ * supplemental characters will first be encoded as a surrogate pair
+ * using shasm_block_pair, and then each surrogate codepoint will be
+ * encoded in UTF-8.  This is not standard behavior, but it is sometimes
+ * used.
+ * 
+ * This function fails if the block reader buffer runs out of space.  In
+ * this case, the block reader buffer state is undefined, and only part
+ * of the output bytecode may have been written.
+ * 
+ * However, this function does *not* set an error state in the block
+ * reader.  This is the caller's responsibility.
+ * 
+ * The UTF-8 encoding system works as follows.  First, determine the
+ * total number of output bytes for the codepoint c according to the
+ * following table:
+ * 
+ *   (                               c < SHASM_BLOCK_UTF8_2BYTE) -> 1
+ *   (c >= SHASM_BLOCK_UTF8_2BYTE && c < SHASM_BLOCK_UTF8_3BYTE) -> 2
+ *   (c >= SHASM_BLOCK_UTF8_3BYTE && c < SHASM_BLOCK_UTF8_4BYTE) -> 3
+ *   (c >= SHASM_BLOCK_UTF8_4BYTE                              ) -> 4
+ * 
+ * Second, extract zero to three continuation bytes, with the number of
+ * continuation bytes as one less than the total number of bytes.  To
+ * extract a continuation byte, take the six least significant bits of
+ * the codepoint, put them in a byte, set the most significant bit of
+ * that byte, and shift the codepoint right six bits.
+ * 
+ * Third, define the leading byte as the remaining bits after the
+ * continuation byte extraction.  If the total number of bytes is
+ * greater than one, then OR the leading byte with one of the following
+ * masks:
+ * 
+ *   SHASM_BLOCK_UTF8_2MASK for two-byte UTF-8 codes
+ *   SHASM_BLOCK_UTF8_3MASK for three-byte UTF-8 codes
+ *   SHASM_BLOCK_UTF8_4MASK for four-byte UTF-8 codes
+ * 
+ * Finally, output the leading byte first.  Then, output any
+ * continuation bytes, but output them in the reverse order from which
+ * they were extracted.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   entity - the entity code to encode
+ * 
+ *   penc - the encoding table
+ * 
+ *   pt - an initialized temporary buffer
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if the block reader was already in an
+ *   error state or this function ran out of space in the block reader
+ *   buffer
+ */
+static int shasm_block_utf8(SHASM_BLOCK *pb, long entity, int cesu8) {
+  
+  int status = 1;
+  long s1 = 0;
+  long s2 = 0;
+  int codelen = 0;
+  unsigned char contb[3];
+  int i = 0;
+  
+  /* Initialize buffer */
+  memset(&(contb[0]), 0, 3);
+  
+  /* Check parameters */
+  if ((pb == NULL) || (entity < 0) || (entity > SHASM_BLOCK_MAXCODE)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* If CESU-8 mode is active and the entity code is in supplemental
+   * range, then split into a surrogate pair and recursively call this
+   * function in regular UTF-8 mode to encode the high surrogate and
+   * then use this function call to encode the low surrogate */
+  if (status && cesu8 && (entity >= SHASM_BLOCK_MINSUPPLEMENTAL)) {
+    /* Split into surrogates */
+    shasm_block_pair(entity, &s1, &s2);
+
+    /* Recursively encode the high surrogate */
+    if (!shasm_block_utf8(pb, s1, 0)) {
+      status = 0;
+    }
+    
+    /* Encode the low surrogate in this function call */
+    entity = s2;
+  }
+  
+  /* Determine the total number of bytes in the UTF-8 encoding */
+  if (status) {
+    if (entity < SHASM_BLOCK_UTF8_2BYTE) {
+      codelen = 1;
+    
+    } else if (entity < SHASM_BLOCK_UTF8_3BYTE) {
+      codelen = 2;
+      
+    } else if (entity < SHASM_BLOCK_UTF8_4BYTE) {
+      codelen = 3;
+      
+    } else {
+      codelen = 4;
+    }
+  }
+  
+  /* Extract continuation bytes (if any) */
+  if (status) {
+    for(i = 0; i < (codelen - 1); i++) {
+      contb[i] = (unsigned char) ((entity & 0x3f) | 0x80);
+      entity >>= 6;
+    }
+  }
+  
+  /* Reverse order of extracted continuation bytes so they are in output
+   * order -- this is only needed if there is more than one continuation
+   * byte (codelen 3 and 4) */
+  if (status && (codelen == 3)) {
+    /* Two continuation bytes, so swap them */
+    i = contb[0];
+    contb[0] = contb[1];
+    contb[1] = (unsigned char) i;
+    
+  } else if (status && (codelen == 4)) {
+    /* Three continuation bytes, so swap first and third */
+    i = contb[0];
+    contb[0] = contb[2];
+    contb[2] = (unsigned char) i;
+  }
+  
+  /* Append the leading byte to the block reader buffer */
+  if (status) {
+    /* Leading byte is remaining bits */
+    i = (int) entity;
+    
+    /* If codelen more than one, add appropriate mask */
+    if (codelen == 2) {
+      i |= SHASM_BLOCK_UTF8_2MASK;
+    
+    } else if (codelen == 3) {
+      i |= SHASM_BLOCK_UTF8_3MASK;
+    
+    } else if (codelen == 4) {
+      i |= SHASM_BLOCK_UTF8_4MASK;
+    }
+    
+    /* Append leading byte */
+    if (!shasm_block_addByte(pb, i)) {
+      status = 0;
+    }
+  }
+  
+  /* Append any trailing continuation bytes */
+  if (status) {
+    for(i = 0; i < (codelen - 1); i++) {
+      if (!shasm_block_addByte(pb, contb[i])) {
         status = 0;
         break;
       }
@@ -795,14 +1066,16 @@ static int shasm_block_encode(
       
       /* UTF-8 encoding */
       case SHASM_BLOCK_OMODE_UTF8:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf8(pb, entity, 0)) {
+          status = 0;
+        }
         break;
       
       /* CESU-8 encoding */
       case SHASM_BLOCK_OMODE_CESU8:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf8(pb, entity, 1)) {
+          status = 0;
+        }
         break;
       
       /* UTF-16 LE encoding */
