@@ -58,6 +58,22 @@
 #define SHASM_BLOCK_MAXSURROGATE (0xdfffL)
 
 /*
+ * The first high surrogate and the first low surrogate codepoints.
+ * 
+ * The high surrogate encodes the ten most significant bits of the
+ * supplemental offset and comes first in the pair, while the low
+ * surrogate encodes the ten least significant bits of the supplemental
+ * offset and comes second in the pair.
+ */
+#define SHASM_BLOCK_HISURROGATE (0xd800L)
+#define SHASM_BLOCK_LOSURROGATE (0xdc00L)
+
+/*
+ * The minimum Unicode codepoint that is in supplemental range.
+ */
+#define SHASM_BLOCK_MINSUPPLEMENTAL (0x10000L)
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -175,6 +191,8 @@ static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt);
 static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
 static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
+
+static void shasm_block_pair(long code, long *pHi, long *pLo);
 
 static int shasm_block_ereg(
     SHASM_BLOCK *pb,
@@ -545,6 +563,57 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
   
   /* Return length */
   return pt->len;
+}
+
+/*
+ * Encode a supplemental Unicode codepoint into a Surrogate pair.
+ * 
+ * The provided code must be in range SHASM_BLOCK_MINSUPPLEMENTAL up to
+ * and including SHASM_BLOCK_MAXCODE.
+ * 
+ * The provided pointers must not be NULL, and they must not be equal to
+ * each other.
+ * 
+ * To compute the surrogates, first determine the supplemental offset by
+ * subtracting SHASM_BLOCK_MINSUPPLEMENTAL from the provided code.
+ * 
+ * Add the ten most significant bits of the supplemental offset to
+ * SHASM_BLOCK_HISURROGATE to get the high surrogate.  Add the ten least
+ * significant bits of the supplemental offset to the constant
+ * SHASM_BLOCK_LOSURROGATE to get the low surrogate.
+ * 
+ * The high surrogate should appear before the low surrogate in the
+ * output.
+ * 
+ * Parameters:
+ * 
+ *   code - the supplemental codepoint
+ * 
+ *   pHi - pointer to the long to receive the high surrogate
+ * 
+ *   pLo - pointer to the long to receive the low surrogate
+ */
+static void shasm_block_pair(long code, long *pHi, long *pLo) {
+  
+  long offs = 0;
+  
+  /* Check parameters */
+  if ((code < SHASM_BLOCK_MINSUPPLEMENTAL) ||
+      (code > SHASM_BLOCK_MAXCODE) ||
+      (pHi == NULL) || (pLo == NULL) || (pHi == pLo)) {
+    abort();
+  }
+  
+  /* Get supplemental offset */
+  offs = code - SHASM_BLOCK_MINSUPPLEMENTAL;
+  
+  /* Split offset into low and high surrogates */
+  *pLo = offs & 0x3ffL;
+  *pHi = (offs >> 10) & 0x3ffL;
+  
+  /* Add the surrogate offsets */
+  *pLo += SHASM_BLOCK_LOSURROGATE;
+  *pHi += SHASM_BLOCK_HISURROGATE;
 }
 
 /*
