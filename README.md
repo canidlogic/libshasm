@@ -77,7 +77,7 @@ The current development roadmap is as follows.  Section references are to the Sh
 
 - [x] Input filtering chain (section 3)
 - [x] Tokenization function (section 4)
-- [ ] Regular string encoding (section 5.2)
+- [x] Regular string encoding (section 5.2)
 - [ ] Regular string decoding (section 5.1)
 - [ ] Base-16 special mode (section 5.3)
 - [ ] Base-85 special mode (section 5.4)
@@ -101,7 +101,7 @@ In order to be able to test the string encoding functionality, this roadmap stag
 
 The specific goals of this roadmap stage are therefore to extend the block reader interface with a regular string data reading function; to add a "string" mode to the test_block program, which reads regular string data from input and reports the result to standard output; to implement the string encoding component; and to define a placeholder string decoding component.
 
-In the next stage, all that must be done is to replace the string encoding component placeholder with an actual implementation.  Then regular string data reading will have been successfully added to the block reader.
+In the next stage, all that must be done is to replace the string decoding component placeholder with an actual implementation.  Then regular string data reading will have been successfully added to the block reader.
 
 Once this roadmap stage has been completed, an alpha 0.2.1 release will be made, keeping with the schedule of handling each roadmap stage that builds out the functionality of the block reader as a separate patch release of the 0.2.x series.
 
@@ -113,14 +113,18 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Define a placeholder string decoder function
 - [x] Define the string encoder, except for output overrides
 - [x] Add UTF-8 and CESU-8 output overrides
-- [ ] Add UTF-16 little and big endian overrides
-- [ ] Add UTF-32 little and big endian overrides
+- [x] Add UTF-16 little and big endian overrides
+- [x] Add UTF-32 little and big endian overrides
 
 The string mode for the testing program will read a string from standard input and report the result string to standard output, along with the rest of the input that follows the string data.  The result string is reported with escape sequences standing in for bytes outside of ASCII printing range.  Command-line parameters allow the particular output override mode to be selected, or a non-override mode using a hardwired test encoding table.  Input override mode will always be selected during testing.  A hardwired test decoding map will be used.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
 ## 5. Releases
+
+### 0.2.1 (alpha)
+
+Began the regular string reader framework, and completed the encoding component.  The decoding component is currently just a placeholder that sends a fixed sequence of entity codes to the encoding component -- this will be replaced with the full decoder in the next release.
 
 ### 0.2.0 (alpha)
 

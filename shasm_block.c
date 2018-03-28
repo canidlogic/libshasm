@@ -217,6 +217,8 @@ static int shasm_block_ereg(
     SHASM_BLOCK_TBUF *pt);
 
 static int shasm_block_utf8(SHASM_BLOCK *pb, long entity, int cesu8);
+static int shasm_block_utf16(SHASM_BLOCK *pb, long entity, int big);
+static int shasm_block_utf32(SHASM_BLOCK *pb, long entity, int big);
 
 static int shasm_block_encode(
     SHASM_BLOCK *pb,
@@ -800,9 +802,7 @@ static int shasm_block_ereg(
  * 
  *   entity - the entity code to encode
  * 
- *   penc - the encoding table
- * 
- *   pt - an initialized temporary buffer
+ *   cesu8 - non-zero for CESU-8 mode, zero for standard UTF-8
  * 
  * Return:
  * 
@@ -917,6 +917,218 @@ static int shasm_block_utf8(SHASM_BLOCK *pb, long entity, int cesu8) {
       if (!shasm_block_addByte(pb, contb[i])) {
         status = 0;
         break;
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Encode an entity value according to the UTF-16 encoding system and
+ * append the output bytes to the block reader buffer.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called, this function fails immediately.
+ * 
+ * The given entity code must be in range zero up to and including
+ * SHASM_BLOCK_MAXCODE.  Surrogates are allowed, and will just be
+ * encoded like any other codepoint.  Supplemental characters are always
+ * encoded as surrogate pairs using shasm_block_pair.
+ * 
+ * If big is non-zero, each UTF-16 character will be encoded in big
+ * endian order, with the most significant byte first.  If big is zero,
+ * each UTF-16 character will be encoded in little endian order, with
+ * the least significant byte first.
+ * 
+ * This function fails if the block reader buffer runs out of space.  In
+ * this case, the block reader buffer state is undefined, and only part
+ * of the output bytecode may have been written.
+ * 
+ * However, this function does *not* set an error state in the block
+ * reader.  This is the caller's responsibility.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   entity - the entity code to encode
+ * 
+ *   big - non-zero for big endian, zero for little endian
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if the block reader was already in an
+ *   error state or this function ran out of space in the block reader
+ *   buffer
+ */
+static int shasm_block_utf16(SHASM_BLOCK *pb, long entity, int big) {
+  
+  int status = 1;
+  long s1 = 0;
+  long s2 = 0;
+  unsigned char vb[2];
+  int c = 0;
+  
+  /* Initialize buffer */
+  memset(&(vb[0]), 0, 2);
+  
+  /* Check parameters */
+  if ((pb == NULL) || (entity < 0) || (entity > SHASM_BLOCK_MAXCODE)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* If the entity code is in supplemental range, then split into a
+   * surrogate pair and recursively call this function to encode the
+   * high surrogate and then use this function call to encode the low
+   * surrogate */
+  if (status && (entity >= SHASM_BLOCK_MINSUPPLEMENTAL)) {
+    /* Split into surrogates */
+    shasm_block_pair(entity, &s1, &s2);
+
+    /* Recursively encode the high surrogate */
+    if (!shasm_block_utf16(pb, s1, big)) {
+      status = 0;
+    }
+    
+    /* Encode the low surrogate in this function call */
+    entity = s2;
+  }
+  
+  /* Entity should now be in range 0x0-0xffff -- split into two bytes in
+   * vb, in little endian order */
+  if (status) {
+    vb[0] = (unsigned char) (entity & 0xff);
+    vb[1] = (unsigned char) ((entity >> 8) & 0xff);
+  }
+  
+  /* If in big endian order, reverse the two bytes */
+  if (status && big) {
+    c = vb[0];
+    vb[0] = vb[1];
+    vb[1] = (unsigned char) c;
+  }
+  
+  
+  /* Append the bytes to block reader buffer */
+  if (status) {
+    if (!shasm_block_addByte(pb, vb[0])) {
+      status = 0;
+    }
+      
+    if (status) {
+      if (!shasm_block_addByte(pb, vb[1])) {
+        status = 0;
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Encode an entity value according to the UTF-32 encoding system and
+ * append the output bytes to the block reader buffer.
+ * 
+ * If the block reader is already in an error state when this function
+ * is called, this function fails immediately.
+ * 
+ * The given entity code must be in range zero up to and including
+ * SHASM_BLOCK_MAXCODE.  Surrogates are allowed, and will just be
+ * encoded like any other codepoint.
+ * 
+ * If big is non-zero, each UTF-32 character will be encoded in big
+ * endian order, with the most significant byte first.  If big is zero,
+ * each UTF-32 character will be encoded in little endian order, with
+ * the least significant byte first.
+ * 
+ * This function fails if the block reader buffer runs out of space.  In
+ * this case, the block reader buffer state is undefined, and only part
+ * of the output bytecode may have been written.
+ * 
+ * However, this function does *not* set an error state in the block
+ * reader.  This is the caller's responsibility.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader
+ * 
+ *   entity - the entity code to encode
+ * 
+ *   big - non-zero for big endian, zero for little endian
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if the block reader was already in an
+ *   error state or this function ran out of space in the block reader
+ *   buffer
+ */
+static int shasm_block_utf32(SHASM_BLOCK *pb, long entity, int big) {
+  
+  int status = 1;
+  unsigned char vb[4];
+  int c = 0;
+  
+  /* Initialize buffer */
+  memset(&(vb[0]), 0, 4);
+  
+  /* Check parameters */
+  if ((pb == NULL) || (entity < 0) || (entity > SHASM_BLOCK_MAXCODE)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Split entity into four bytes in vb, in little endian order */
+  if (status) {
+    vb[0] = (unsigned char) (entity & 0xff);
+    vb[1] = (unsigned char) ((entity >> 8) & 0xff);
+    vb[2] = (unsigned char) ((entity >> 16) & 0xff);
+    vb[3] = (unsigned char) ((entity >> 24) & 0xff);
+  }
+  
+  /* If in big endian order, reverse the four bytes */
+  if (status && big) {
+    c = vb[0];
+    vb[0] = vb[3];
+    vb[3] = (unsigned char) c;
+    
+    c = vb[1];
+    vb[1] = vb[2];
+    vb[2] = (unsigned char) c;
+  }
+  
+  /* Append the bytes to block reader buffer */
+  if (status) {
+    if (!shasm_block_addByte(pb, vb[0])) {
+      status = 0;
+    }
+      
+    if (status) {
+      if (!shasm_block_addByte(pb, vb[1])) {
+        status = 0;
+      }
+    }
+    
+    if (status) {
+      if (!shasm_block_addByte(pb, vb[2])) {
+        status = 0;
+      }
+    }
+    
+    if (status) {
+      if (!shasm_block_addByte(pb, vb[3])) {
+        status = 0;
       }
     }
   }
@@ -1080,26 +1292,30 @@ static int shasm_block_encode(
       
       /* UTF-16 LE encoding */
       case SHASM_BLOCK_OMODE_U16LE:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf16(pb, entity, 0)) {
+          status = 0;
+        }
         break;
       
       /* UTF-16 BE encoding */
       case SHASM_BLOCK_OMODE_U16BE:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf16(pb, entity, 1)) {
+          status = 0;
+        }
         break;
       
       /* UTF-32 LE encoding */
       case SHASM_BLOCK_OMODE_U32LE:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf32(pb, entity, 0)) {
+          status = 0;
+        }
         break;
       
       /* UTF-32 BE encoding */
       case SHASM_BLOCK_OMODE_U32BE:
-        /* @@TODO: */
-        abort();
+        if (!shasm_block_utf32(pb, entity, 1)) {
+          status = 0;
+        }
         break;
       
       /* Unrecognized mode */
