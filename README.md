@@ -113,7 +113,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Define a placeholder string decoder function
 - [x] Define the string encoder, except for output overrides
 - [x] Add UTF-8 and CESU-8 output overrides
-- [ ] Add UTF-16 little and big endian overrides
+- [x] Add UTF-16 little and big endian overrides
 - [ ] Add UTF-32 little and big endian overrides
 
 The string mode for the testing program will read a string from standard input and report the result string to standard output, along with the rest of the input that follows the string data.  The result string is reported with escape sequences standing in for bytes outside of ASCII printing range.  Command-line parameters allow the particular output override mode to be selected, or a non-override mode using a hardwired test encoding table.  Input override mode will always be selected during testing.  A hardwired test decoding map will be used.
