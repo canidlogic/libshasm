@@ -78,7 +78,29 @@ In section 5.1 of draft 3V:C4-5 of the Shastina Specification, the method for re
 
 The following subsections describe the clarified regular string decoding algorithm.
 
-#### 2.6.1 Decoder architecture
+#### 2.6.1 Decoding map overlay
+
+In order to ensure the decoding operation proceeds smoothly, certain keys in the decoding map must be ignored if they occur.  The decoding map overlay is a wrapper around the decoding map that the client provides, which makes sure the necessary keys are ignored.  In addition, the overlay provides a function which returns whether the current node is a "stop" node, which means it is guaranteed that there are no branches from this node and that the client should not read any further in input.  (This is to prevent the client from reading beyond the closing quote or curly bracket of the input string data.)  There are also functions for returning the most recent branch character (if at least one branch has been taken) and whether the most recent branch was the first branch taken.
+
+The overlay's function for resetting the position back to the root takes a parameter indicating whether the nesting level should be changed.  The change can increase the nesting level or decrease it.  This is only allowed for {} string types, and the nesting level may never go below the initial level of one.  The branch and entity functions have the same interface as the underlying decoding map.
+
+The stop node function returns true in a "" string if at least one branch has been taken and the last branch taken was for the " quote.  The stope node function returns true in a '' string if at least one branch has been taken and the last branch taken was for the ' quote.  The stop node function returns true in a {} string if at least one branch has been taken and the last branch taken was for the { or } bracket.
+
+The overlay branch function normally calls through to the underlying decoding map.  However, in the following cases, it always returns that there is no branch, without consulting the underlying decoding map:
+
+(1) If the current node is a stop node, the branch function always fails.
+
+(2) In a "" string, if no branches have been taken yet, the " branch fails if attempted as the first branch.  In a '' string, if no branches have been taken yet, the ' branch fails if attempted as the first branch.
+
+(3) In a {} string, if no branches have been taken yet and the nesting level is one, the } branch fails if attempted as the first branch.
+
+(4) If an input override is active, branches corresponding to bytes with their most significant bit set always fail.
+
+The overlay entity function normally calls through to the underlying decoding map.  The only exception is that if no branches have been taken yet, the function always returns no entity without querying the underlying decoding map.  This has the effect of ignoring empty keys.
+
+...
+
+#### 2.6.2 Decoder architecture
 
 The purpose of the regular string decoder is convert a filtered sequence of input bytes received from the input filter stack into a sequence of entity codes which can then be passed to the string encoder.
 
@@ -88,20 +110,13 @@ The inner decoder will decode zero or more entity codes from the input stream, p
 
 The outer decoder has a loop that begins by calling the inner decoder.  If the inner decoder returns successfully, the outer decoder will then attempt to interpret the data the inner decoder stopped at (reading direct from the input filter stack) using the built-in keys.  The built-in keys include the terminal characters (which cause the decoding loop to end successfully), and, if an input override is selected, sequences of bytes with their most significant bit set -- which are decoded according to the override and passed through to the encoding function.  If the loop hasn't terminated on error or on account of a terminal built-in key, it then loops back and calls the inner decoder again.
 
-#### 2.6.2 Inner decoder buffer
+#### 2.6.3 Inner decoder buffer
 
 The buffer used by the inner decoder is based on a circular queue that grows dynamically in size.  The basic operations are to add a byte to the end of the queue (growing the queue if necessary), to remove one or more bytes from the front of the queue, and to read a byte from the start of the queue (if available).
 
 The buffer uses the dynamic circular queue within it to store the buffered data.  It is wrapped around the input filter chain.  Normally it just passes data through without buffering it.  However, it supports a "mark" and a "restore" function.  The mark function remembers the current location in input and starts buffering data.  The restore function uses the buffer to simulate a return to the most recently marked position and clears the mark.  (Clearing a mark can be done by marking the current position and immediately restoring to the current position.)
 
 Finally, there is a "detach" function.  If there are no buffered bytes and no active marks, the detach function succeeds without doing anything.  If there is one buffered byte and no active marks, the detach function succeeds after clearing the buffer and using the pushback filter to push the byte back.  If there is more than one buffered byte or an active mark, the detach function fails.  A successful detach function causes the buffer to be completely emptied, so that the inner decoder can return to the outer decoder and the outer decoder can pick up the input using just the pushback buffer from the input filter chain.
-
-#### 2.6.3 Decoding map overlay
-
-In order to ensure the decoding operation proceeds smoothly, certain keys in the decoding map must be ignored if they occur.  The decoding map overlay is a wrapper around the decoding map that the client provides, which makes sure the necessary keys are ignored.  In addition, the overlay provides a function which returns whether a marker character was just read, which means the client should not read any
-bytes further and that there are no further branches from the current node.
-
-The wrapped reset function of the overlay resets the underlying decoding map to root position and resets it own state.
 
 ...
 
