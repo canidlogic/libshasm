@@ -98,9 +98,35 @@ The overlay branch function normally calls through to the underlying decoding ma
 
 The overlay entity function normally calls through to the underlying decoding map.  The only exception is that if no branches have been taken yet, the function always returns no entity without querying the underlying decoding map.  This has the effect of ignoring empty keys.
 
+#### 2.6.2 Speculation buffer
+
+The regular string decoder requires a more sophisticated buffer than the single-byte pushback buffer offered by the input filter stack.  The "speculation buffer" is built on top of the input filter stack to allow for more sophisticated backtracking during regular string decoding.
+
+The speculation buffer has a "detach" function (described later) that empties the speculation buffer such that the input filter stack can pick up right where the speculation buffer left off.  This allows the speculation buffer to be used only where required, and for the rest the speculation buffer can be detached and Shastina can return to only using the single-byte pushback buffer in the input filter stack.
+
+The speculation buffer stores zero or more bytes before the current filtered input position.  The speculation buffer is divided into zero or more bytes in a "back" buffer followed by zero or more bytes in a "front" buffer.  Together, the back and front buffer fill the eniter speculation buffer, such that the bytes in the back buffer come first, followed by the bytes in the front buffer, followed by additional filtered input bytes read from the input filter stack.  The speculation buffer never uses the pushback buffer of the input filter stack, except during the detach operation as described later.
+
+The speculation buffer starts out with both the back and front buffers empty.  There is also a "mark" flag that starts out clear.  If the mark flag is clear, then the back buffer must be empty.  (If the mark flag is set, the back buffer may be empty or it may have one or more bytes in it.)
+
+The read operation of the speculation buffer first checks whether the mark flag is set.  If the mark flag is clear, the speculation buffer checks whether the front buffer is empty; if it is not empty, a byte is taken from the front of the front buffer and returned; else, a byte is read directly from the input filter stack and returned.  If the mark flag is set, the speculation buffer checks whether the front buffer is empty; if it is not empty, a byte is transferred from the front of the front buffer to the end of the back buffer and this transferred byte is returned; else, a byte is read directly from the input filter stack, copied to the end of the back buffer, and returned.
+
+The mark operation of the speculation buffer empties the back buffer if not already empty, discarding its contents.  It then sets the mark flag if it has not yet been set.
+
+The restore operation of the speculation buffer clears the mark flag and transfers any bytes in the back buffer to the start of the front buffer.
+
+The backtrack operation can only be used if the mark flag is set and there is at least one byte in the back buffer.  If these conditions hold, one byte is transferred from the end of the back buffer to the start of the front buffer.
+
+The unmark operation performs a mark operation followed by a restore operation.  It has the effect of keeping the input position where it is but clearing any marks.
+
+The detach operation has three cases.  If the mark flag is clear and the front buffer is empty, the detach operation returns successfully without doing anything.  If the mark flag is clear and the front buffer has one byte, the detach operation sets pushback mode in the input filter stack, empties the front buffer, and returns successfully.  If the mark flag is set or the front buffer has more than one byte, the detach operation fails.
+
+The read operation allows for regular reading from the buffer.  Use the mark operation to remember the input position, and use restore to recall the most recently marked input position.  Backtrack allows for backtracking, provided that a mark is active and backtracking does not go further back than the most recent mark.  Unmark clears any mark that has been set.  Finally, detach empties the speculation buffer while synchronizing with the input filter stack (if possible).
+
+The speculation buffer is built around a circular queue structure that grows dynamically.  The queue provides functions for appending a byte to the end of the queue, for removing one or more bytes from the start of the queue, and for retrieving an element given an index relative to the start of the queue.  Growth is achieved by expanding the memory block and moving any trailing portion of the queue to the new end of the memory area.  The back and front buffers are built on top of the circular queue by storing the count of bytes in each.  Transfers between the two buffers can be done by just adjusting the two byte counts.
+
 ...
 
-#### 2.6.2 Decoder architecture
+#### 2.6.3 Decoder architecture
 
 The purpose of the regular string decoder is convert a filtered sequence of input bytes received from the input filter stack into a sequence of entity codes which can then be passed to the string encoder.
 
@@ -109,14 +135,6 @@ In order to implement the greedy matching required for using the decoding map, a
 The inner decoder will decode zero or more entity codes from the input stream, passing these through to the encoder function.  The inner decoder will also handle numeric escapes.  The inner decoder stops when it encounters something it can't decode.  The inner decoder is successful if it manages to detach its buffer (described later) such that the outer decoder can make another attempt at decoding what the inner decoder stopped at by reading directly from the input filter stack.  A decoding error occurs in any other case -- if the inner decoder's buffer can't be detached, it means that there is data that the outer decoder wouldn't be able to interpret, either.  (This is guaranteed by the kinds of decoding keys that the inner decoding loop will ignore, described later.)
 
 The outer decoder has a loop that begins by calling the inner decoder.  If the inner decoder returns successfully, the outer decoder will then attempt to interpret the data the inner decoder stopped at (reading direct from the input filter stack) using the built-in keys.  The built-in keys include the terminal characters (which cause the decoding loop to end successfully), and, if an input override is selected, sequences of bytes with their most significant bit set -- which are decoded according to the override and passed through to the encoding function.  If the loop hasn't terminated on error or on account of a terminal built-in key, it then loops back and calls the inner decoder again.
-
-#### 2.6.3 Inner decoder buffer
-
-The buffer used by the inner decoder is based on a circular queue that grows dynamically in size.  The basic operations are to add a byte to the end of the queue (growing the queue if necessary), to remove one or more bytes from the front of the queue, and to read a byte from the start of the queue (if available).
-
-The buffer uses the dynamic circular queue within it to store the buffered data.  It is wrapped around the input filter chain.  Normally it just passes data through without buffering it.  However, it supports a "mark" and a "restore" function.  The mark function remembers the current location in input and starts buffering data.  The restore function uses the buffer to simulate a return to the most recently marked position and clears the mark.  (Clearing a mark can be done by marking the current position and immediately restoring to the current position.)
-
-Finally, there is a "detach" function.  If there are no buffered bytes and no active marks, the detach function succeeds without doing anything.  If there is one buffered byte and no active marks, the detach function succeeds after clearing the buffer and using the pushback filter to push the byte back.  If there is more than one buffered byte or an active mark, the detach function fails.  A successful detach function causes the buffer to be completely emptied, so that the inner decoder can return to the outer decoder and the outer decoder can pick up the input using just the pushback buffer from the input filter chain.
 
 ...
 
