@@ -132,7 +132,7 @@ Around the innermost layer is a wrapper that handles numeric escapes.  It has th
 
 The outermost inner decoding function calls through to the numeric escape wrapper.  For any entity codes it receives, it sends these to the encoding phases.  It returns when the a successful no-entity return has been received.
 
-The outer decoding function is built around the inner decoding functions.  Unlike the inner decoding functions, it does not use the speculation buffer but rather handles everything with the pushback buffer of the input filter stack.  Its loop begins by calling the outermost inner decoding function to decode a sequence of zero or more entities (including numeric escaped entities) and send those to the encoder.  Then, it picks up where the inner decoding functions left off and tries to interpret the data using the built-in keys.  The built-in keys include the terminal (closing single or double quote or closing curly bracket) for the particular string type, and, if and input override is active, sequences of bytes with their most significant bit set.  If a terminal key is encountered, the decoder finishes.  If an input override key is encountered, the decoder decodes one or more filtered input bytes according to the input override, sending the decoded entities to the encoder.  It then loops back to the beginning.
+The outer decoding function is built around the inner decoding functions.  Unlike the inner decoding functions, it does not use the speculation buffer but rather handles everything with the pushback buffer of the input filter stack.  Its loop begins by calling the outermost inner decoding function to decode a sequence of zero or more entities (including numeric escaped entities) and send those to the encoder.  Then, it picks up where the inner decoding functions left off and tries to interpret the data using the built-in keys.  The built-in keys include the terminal (closing single or double quote or closing curly bracket) for the particular string type, and, if an input override is active, sequences of bytes with their most significant bit set.  If a terminal key is encountered, the decoder finishes.  If an input override key is encountered, the decoder decodes one or more filtered input bytes according to the input override, sending the decoded entities to the encoder.  It then loops back to the beginning.
 
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
@@ -161,20 +161,25 @@ However, regular string decoding is rather complex, so this roadmap stage will l
 
 See the "Regular string decoding algorithm" divergence earlier in this readme for a clarification of how the regular string decoding system works.
 
-...
-
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [x] Define the regular string reading interface
-- [x] Extend the block testing program with a string mode
-- [x] Define a placeholder string decoder function
-- [x] Define the string encoder, except for output overrides
-- [x] Add UTF-8 and CESU-8 output overrides
-- [x] Add UTF-16 little and big endian overrides
-- [x] Add UTF-32 little and big endian overrides
+- [ ] Define decoding overlay interface
+- [ ] Define circular queue interface
+- [ ] Define speculation buffer interface
+- [ ] Define inner decoding interfaces
+- [ ] Revise outer decoding interface
+- [ ] Write inner placeholders (return no entity)
+- [ ] Write outer function with terminal keys only
+- [ ] Add input override support to outer function
+- [ ] Write outermost inner function
+- [ ] Implement circular queue
+- [ ] Implement speculation buffer
+- [ ] Write numeric escape inner function
+- [ ] Implement decoding overlay
+- [ ] Write innermost decoding function
 
-The string mode for the testing program will read a string from standard input and report the result string to standard output, along with the rest of the input that follows the string data.  The result string is reported with escape sequences standing in for bytes outside of ASCII printing range.  Command-line parameters allow the particular output override mode to be selected, or a non-override mode using a hardwired test encoding table.  Input override mode will always be selected during testing.  A hardwired test decoding map will be used.
+The basic approach is to write the interfaces first (first five steps), add placeholders (next step), and then finish the functions starting with the outermost decoding function and working inward.  At first, only empty strings (terminal key immediately) are supported.  Then, strings with only extended UTF-8 characters in input override mode are supported.  Then, strings beginning with numeric escapes.  Finally, full decoding support.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
