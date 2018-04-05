@@ -72,6 +72,68 @@ libshasm adds a strict flag to be used in conjunction with the output overrides 
 
 In the current specification, output overrides always apply to the full Unicode codepoint range of 0x0 through 0x10ffff.  libshasm behaves like the specification if the strict flag is off.  If the strict flag is on, then output overrides only apply to the full Unicode codepoint range excluding the surrogate range, which is handled by the encoding table.
 
+### 2.6 Regular string decoding algorithm
+
+In section 5.1 of draft 3V:C4-5 of the Shastina Specification, the method for regular string decoding is described.  It's a bit difficult from the description to determine how to implement the decoding algorithm.  This section provides a clarified description of the regular string decoding algorithm.  This is not a true divergence since it doesn't change the specified behavior, but the specification should be updated with this clarified explanation to make the system clearer.
+
+The following subsections describe the clarified regular string decoding algorithm.
+
+#### 2.6.1 Decoding map overlay
+
+In order to ensure the decoding operation proceeds smoothly, certain keys in the decoding map must be ignored if they occur.  The decoding map overlay is a wrapper around the decoding map that the client provides, which makes sure the necessary keys are ignored.  In addition, the overlay provides a function which returns whether the current node is a "stop" node, which means it is guaranteed that there are no branches from this node and that the client should not read any further in input.  (This is to prevent the client from reading beyond the closing quote or curly bracket of the input string data.)  There are also functions for returning the most recent branch character (if at least one branch has been taken) and whether the most recent branch was the first branch taken.
+
+The overlay's function for resetting the position back to the root takes a parameter indicating whether the nesting level should be changed, or whether it should be reset to the initial value of one.  The change can increase the nesting level or decrease it.  This is only allowed for {} string types, and the nesting level may never go below the initial level of one.  The branch and entity functions have the same interface as the underlying decoding map.
+
+The stop node function returns true in a "" string if at least one branch has been taken and the last branch taken was for the " quote.  The stope node function returns true in a '' string if at least one branch has been taken and the last branch taken was for the ' quote.  The stop node function returns true in a {} string if at least one branch has been taken and the last branch taken was for the { or } bracket.
+
+The overlay branch function normally calls through to the underlying decoding map.  However, in the following cases, it always returns that there is no branch, without consulting the underlying decoding map:
+
+(1) If the current node is a stop node, the branch function always fails.
+
+(2) In a "" string, if no branches have been taken yet, the " branch fails if attempted as the first branch.  In a '' string, if no branches have been taken yet, the ' branch fails if attempted as the first branch.
+
+(3) In a {} string, if no branches have been taken yet and the nesting level is one, the } branch fails if attempted as the first branch.
+
+(4) If an input override is active, branches corresponding to bytes with their most significant bit set always fail.
+
+The overlay entity function normally calls through to the underlying decoding map.  The only exception is that if no branches have been taken yet, the function always returns no entity without querying the underlying decoding map.  This has the effect of ignoring empty keys.
+
+#### 2.6.2 Speculation buffer
+
+The regular string decoder requires a more sophisticated buffer than the single-byte pushback buffer offered by the input filter stack.  The "speculation buffer" is built on top of the input filter stack to allow for more sophisticated backtracking during regular string decoding.
+
+The speculation buffer has a "detach" function (described later) that empties the speculation buffer such that the input filter stack can pick up right where the speculation buffer left off.  This allows the speculation buffer to be used only where required, and for the rest the speculation buffer can be detached and Shastina can return to only using the single-byte pushback buffer in the input filter stack.
+
+The speculation buffer stores zero or more bytes before the current filtered input position.  The speculation buffer is divided into zero or more bytes in a "back" buffer followed by zero or more bytes in a "front" buffer.  Together, the back and front buffer fill the eniter speculation buffer, such that the bytes in the back buffer come first, followed by the bytes in the front buffer, followed by additional filtered input bytes read from the input filter stack.  The speculation buffer never uses the pushback buffer of the input filter stack, except during the detach operation as described later.
+
+The speculation buffer starts out with both the back and front buffers empty.  There is also a "mark" flag that starts out clear.  If the mark flag is clear, then the back buffer must be empty.  (If the mark flag is set, the back buffer may be empty or it may have one or more bytes in it.)
+
+The read operation of the speculation buffer first checks whether the mark flag is set.  If the mark flag is clear, the speculation buffer checks whether the front buffer is empty; if it is not empty, a byte is taken from the front of the front buffer and returned; else, a byte is read directly from the input filter stack and returned.  If the mark flag is set, the speculation buffer checks whether the front buffer is empty; if it is not empty, a byte is transferred from the front of the front buffer to the end of the back buffer and this transferred byte is returned; else, a byte is read directly from the input filter stack, copied to the end of the back buffer, and returned.
+
+The mark operation of the speculation buffer empties the back buffer if not already empty, discarding its contents.  It then sets the mark flag if it has not yet been set.
+
+The restore operation of the speculation buffer clears the mark flag and transfers any bytes in the back buffer to the start of the front buffer.
+
+The backtrack operation can only be used if the mark flag is set and there is at least one byte in the back buffer.  If these conditions hold, one byte is transferred from the end of the back buffer to the start of the front buffer.
+
+The unmark operation performs a mark operation followed by a restore operation.  It has the effect of keeping the input position where it is but clearing any marks.
+
+The detach operation has three cases.  If the mark flag is clear and the front buffer is empty, the detach operation returns successfully without doing anything.  If the mark flag is clear and the front buffer has one byte, the detach operation sets pushback mode in the input filter stack, empties the front buffer, and returns successfully.  If the mark flag is set or the front buffer has more than one byte, the detach operation fails.
+
+The read operation allows for regular reading from the buffer.  Use the mark operation to remember the input position, and use restore to recall the most recently marked input position.  Backtrack allows for backtracking, provided that a mark is active and backtracking does not go further back than the most recent mark.  Unmark clears any mark that has been set.  Finally, detach empties the speculation buffer while synchronizing with the input filter stack (if possible).
+
+The speculation buffer is built around a circular queue structure that grows dynamically.  The queue provides functions for appending a byte to the end of the queue, for removing one or more bytes from the start of the queue, and for retrieving an element given an index relative to the start of the queue.  Growth is achieved by expanding the memory block and moving any trailing portion of the queue to the new end of the memory area.  The back and front buffers are built on top of the circular queue by storing the count of bytes in each.  Transfers between the two buffers can be done by just adjusting the two byte counts.
+
+#### 2.6.3 Algorithm
+
+The innermost layer of the regular string decoding algorithm uses the decoding map to either decode the next entity value and return that, or return that no entity could be found and that the speculation buffer has been successfully detached.  All other conditions result in error.  The innermost layer uses the decoding map overlay (described above) over the decoding map, and the speculation buffer (described above) over the input filter stack.  Before the loop, the speculation buffer is unmarked to reset the buffer and the decoding overlay is fully reset (also clearing the nesting level to one).  The loop begins by reading a byte from the speculation buffer.  It then attempts to branch in the decoding overlay according to the read byte.  If branching succeeds, the speculation buffer is marked and the entity code remembered if the new location has an entity code; also, the stop flag is set if the new location is a stop node; also, if this is a {} string and this is the first branch and the byte was either { or } then increase or decrease the nesting level in the decoding overlay.  If branching fails, the stop flag is set.  At the end of the loop, if the stop flag is set, then check whether the speculation buffer is marked; if it is marked, restore the marked location and return the most recently remembered entity code; otherwise, attempt to detach, returning successfully with no entity code if the detach operation is successful, and otherwise returning an error.  If the stop flag is clear at the end of the loop, loop back to the beginning.
+
+Around the innermost layer is a wrapper that handles numeric escapes.  It has the same interface as the innermost layer.  It calls through to the innermost layer.  If the innermost layer returns successfully with no entity code, this result is passed through.  If the innermost layer returns an entity code, this wrapper checks whether the entity code matches a numeric escape by querying the escape list.  If there is no match, the entity code is passed through.  If there is a match, the wrapper gets the numeric escape information, reads the digits (using mark and backtrack functionality of the speculation buffer), and then returns the entity code decoded from the digits rather than the entity code returned by the innermost layer.  This enables numeric escaping.
+
+The outermost inner decoding function calls through to the numeric escape wrapper.  For any entity codes it receives, it sends these to the encoding phase.  It returns when a successful no-entity return has been received.
+
+The outer decoding function is built around the inner decoding functions.  Unlike the inner decoding functions, it does not use the speculation buffer but rather handles everything with the pushback buffer of the input filter stack.  Its loop begins by calling the outermost inner decoding function to decode a sequence of zero or more entities (including numeric escaped entities) and send those to the encoder.  Then, it picks up where the inner decoding functions left off and tries to interpret the data using the built-in keys.  The built-in keys include the terminal (closing single or double quote or closing curly bracket) for the particular string type, and, if an input override is active, sequences of bytes with their most significant bit set.  If a terminal key is encountered, the decoder finishes.  If an input override key is encountered, the decoder decodes one or more filtered input bytes according to the input override, sending the decoded entities to the encoder.  It then loops back to the beginning.
+
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
@@ -91,32 +153,33 @@ The current development roadmap is as follows.  Section references are to the Sh
 Tasks will be completed in the order shown above.  This roadmap may be revised along the way.
 
 ## 4. Current goal
-The current goal is the third stage of the roadmap, which is to complete the regular string encoding functionality of the block reader.
+The current goal is the fourth stage of the roadmap, which is to complete the regular string decoding functionality of the block reader.  Together with the previous roadmap stage, this will complete the regular string reader of the shasm_block module.
 
-This roadmap stage makes use of the block reader architecture and testing module established in the previous roadmap stage.  This stage is closely linked with the next one, which together add a regular string data reader to the block reader module.  Since regular string data interpretation is rather complex, adding the regular string data reader is split into two separate roadmap stages.
+The interface and testing module for the string decoder were already established in the previous roadmap stage, with a placeholder for the string decoder function that simply sends a fixed sequence of entity codes to the encoder.  The only objective of the current roadmap stage is therefore to replace the placeholder string decoder function with a full regular string decoder implementation.
 
-In this first stage of adding regular string data reading, the focus is on establishing the string encoding component, which converts decoded entity codes into the output bytes that are placed in the result string.  The next roadmap stage will then complete regular string data reading functionality by adding the string decoding component, which converts filtered input bytes into entity codes.  In short, a bottom-up model will be used to complete the regular string data reading functionality, where the module closest to output is completed first, and then the module closest to input is added on top of it.
+However, regular string decoding is rather complex, so this roadmap stage will likely turn out to be the most difficult of the project.  Once this roadmap stage has been completed, an alpha 0.2.2 release will be made, keeping with the schedule of handling each roadmap stage that builds out the functionality of the block reader as a separate patch release of the 0.2.x series.
 
-In order to be able to test the string encoding functionality, this roadmap stage will define the interface of the full string data reader function and add a placeholder for the decoding stage that ignores input and instead just sends a hardwired sequence of entity codes to the string encoding component.  This will allow the testing module to test the string encoding component as if the string decoding component already existed -- in actuality, program input will be ignored and the placeholder decoder will always provide the encoder with a fixed testing sequence of entity codes.
-
-The specific goals of this roadmap stage are therefore to extend the block reader interface with a regular string data reading function; to add a "string" mode to the test_block program, which reads regular string data from input and reports the result to standard output; to implement the string encoding component; and to define a placeholder string decoding component.
-
-In the next stage, all that must be done is to replace the string decoding component placeholder with an actual implementation.  Then regular string data reading will have been successfully added to the block reader.
-
-Once this roadmap stage has been completed, an alpha 0.2.1 release will be made, keeping with the schedule of handling each roadmap stage that builds out the functionality of the block reader as a separate patch release of the 0.2.x series.
+See the "Regular string decoding algorithm" divergence earlier in this readme for a clarification of how the regular string decoding system works.
 
 ### 4.1 Worklist
 To reach the current goal, the following steps will be taken, in the order shown below:
 
-- [x] Define the regular string reading interface
-- [x] Extend the block testing program with a string mode
-- [x] Define a placeholder string decoder function
-- [x] Define the string encoder, except for output overrides
-- [x] Add UTF-8 and CESU-8 output overrides
-- [x] Add UTF-16 little and big endian overrides
-- [x] Add UTF-32 little and big endian overrides
+- [ ] Define decoding overlay interface
+- [ ] Define circular queue interface
+- [ ] Define speculation buffer interface
+- [ ] Define inner decoding interfaces
+- [ ] Revise outer decoding interface
+- [ ] Write inner placeholders (return no entity)
+- [ ] Write outer function with terminal keys only
+- [ ] Add input override support to outer function
+- [ ] Write outermost inner function
+- [ ] Implement circular queue
+- [ ] Implement speculation buffer
+- [ ] Write numeric escape inner function
+- [ ] Implement decoding overlay
+- [ ] Write innermost decoding function
 
-The string mode for the testing program will read a string from standard input and report the result string to standard output, along with the rest of the input that follows the string data.  The result string is reported with escape sequences standing in for bytes outside of ASCII printing range.  Command-line parameters allow the particular output override mode to be selected, or a non-override mode using a hardwired test encoding table.  Input override mode will always be selected during testing.  A hardwired test decoding map will be used.
+The basic approach is to write the interfaces first (first five steps), add placeholders (next step), and then finish the functions starting with the outermost decoding function and working inward.  At first, only empty strings (terminal key immediately) are supported.  Then, strings with only extended UTF-8 characters in input override mode are supported.  Then, strings beginning with numeric escapes.  Finally, full decoding support.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
