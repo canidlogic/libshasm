@@ -90,6 +90,14 @@
 #define SHASM_BLOCK_UTF8_4MASK (0XF0)
 
 /*
+ * Nesting level change constants.
+ */
+#define SHASM_BLOCK_DOVER_NEST_STAY  (0)  /* Keep nesting level as-is */
+#define SHASM_BLOCK_DOVER_NEST_INC   (1)  /* Increment nesting level */
+#define SHASM_BLOCK_DOVER_NEST_DEC   (2)  /* Decrement nesting level */
+#define SHASM_BLOCK_DOVER_NEST_RESET (3)  /* Reset level to one */
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -262,6 +270,12 @@ static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt);
 static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
 static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
+
+/* @@TODO: */
+static void shasm_block_dover_init(
+    SHASM_BLOCK_DOVER *pdo,
+    const SHASM_BLOCK_STRING *sp);
+static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -638,6 +652,78 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
   
   /* Return length */
   return pt->len;
+}
+
+/*
+ * Initialize a decoding map overlay structure.
+ * 
+ * Provide the string type parameters to use to initialize the overlay
+ * structure.  All necessary information will be copied into the
+ * decoding map overlay structure.
+ * 
+ * The decoding map overlay structure does not need to be cleaned up or
+ * deinitialized in any way before being released.
+ * 
+ * The underlying decoding map will be reset to root position by this
+ * function.  Undefined behavior occurs if the underlying decoding map
+ * is accessed by anything besides this decoding map overlay while the
+ * overlay is in use.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay to initialize
+ * 
+ *   sp - the string type parameters to initialize the overlay with
+ */
+static void shasm_block_dover_init(
+    SHASM_BLOCK_DOVER *pdo,
+    const SHASM_BLOCK_STRING *sp) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset the position of a decoding map overlay back to the root node,
+ * possibly changing the nesting level.
+ * 
+ * The overlay structure must already have been initialized with
+ * shasm_block_dover_init.
+ * 
+ * The underlying decoding map will be reset back to the root node
+ * position, and the state of the overlay except for the nesting level
+ * will be reset to its initial value.
+ * 
+ * The nest parameter is one of the SHASM_BLOCK_DOVER_NEST constants,
+ * which specifies what to do with the nesting level on reset.
+ * 
+ * If STAY is specified, the nesting level stays at its current value.
+ * 
+ * If INC is specified, the nesting level increases by one.  This may
+ * only be used for {} string types; a fault occurs if it is specified
+ * for other string types.  The function fails if incrementing the
+ * nesting level would cause the level to rise to LONG_MAX.  If the
+ * function fails, the overlay structure is unmodified and not reset.
+ * 
+ * If DEC is specified, the nesting level decreases by one.  This may
+ * only be used for {} string types; a fault occurs if it is specified
+ * for other string types.  A fault occurs if this would cause the
+ * nesting level to decrease below one.
+ * 
+ * If RESET is specified, the nesting level is set to the initial value
+ * of one.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to reset
+ * 
+ *   nest - the nesting level code
+ * 
+ * Return:
+ * 
+ *   non-zero if successful; zero if failure due to nesting level
+ *   overflow
+ */
+static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
+  /* @@TODO: */
 }
 
 /*
