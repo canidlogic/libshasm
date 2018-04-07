@@ -190,6 +190,61 @@ typedef struct {
   
 } SHASM_BLOCK_TBUF;
 
+/*
+ * Structure for storing decoding map overlay state.
+ * 
+ * Use the shasm_decoder_overlay functions to work with this structure.
+ */
+typedef struct {
+  
+  /*
+   * The decoding map that this overlay is set on top of.
+   */
+  SHASM_BLOCK_DECODER dec;
+  
+  /*
+   * The most recent branch taken, or -1 to indicate that no branches
+   * have been taken from root.
+   * 
+   * This starts out at -1 to indicate the decoding map is at the root
+   * node and no branches have been taken.
+   * 
+   * When a successful branch is taken, the unsigned byte value (0-255)
+   * of the branch is stored in this field.
+   */
+  int recent;
+  
+  /*
+   * The type of string currently being decoded.
+   * 
+   * This determines whether the string data is a "" '' or {} string.
+   * 
+   * It must be one of the SHASM_BLOCK_STYPE constants.
+   */
+  int stype;
+  
+  /*
+   * The input override mode of the string currently being decoded.
+   * 
+   * This must be one of the SHASM_BLOCK_IMODE constants.  Use the
+   * constant SHASM_BLOCK_IMODE_NONE if there are no input overrides.
+   */
+  int i_over;
+  
+  /*
+   * The bracket nesting level.
+   * 
+   * This starts out at one and may never go below one.  An error occurs
+   * if this reaches LONG_MAX.
+   * 
+   * The nesting level may only be changed in SHASM_BLOCK_STYPE_CURLY {}
+   * strings.  Faults occur if the nesting level is changed for other
+   * string types.
+   */
+  long nest_level;
+  
+} SHASM_DECODER_OVERLAY;
+
 /* 
  * Local functions
  * ===============

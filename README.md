@@ -84,7 +84,7 @@ In order to ensure the decoding operation proceeds smoothly, certain keys in the
 
 The overlay's function for resetting the position back to the root takes a parameter indicating whether the nesting level should be changed, or whether it should be reset to the initial value of one.  The change can increase the nesting level or decrease it.  This is only allowed for {} string types, and the nesting level may never go below the initial level of one.  The branch and entity functions have the same interface as the underlying decoding map.
 
-The stop node function returns true in a "" string if at least one branch has been taken and the last branch taken was for the " quote.  The stope node function returns true in a '' string if at least one branch has been taken and the last branch taken was for the ' quote.  The stop node function returns true in a {} string if at least one branch has been taken and the last branch taken was for the { or } bracket.
+The stop node function returns true in a "" string if at least one branch has been taken and the last branch taken was for the " quote.  The stop node function returns true in a '' string if at least one branch has been taken and the last branch taken was for the ' quote.  The stop node function returns true in a {} string if at least one branch has been taken and the last branch taken was for the { or } bracket.
 
 The overlay branch function normally calls through to the underlying decoding map.  However, in the following cases, it always returns that there is no branch, without consulting the underlying decoding map:
 
