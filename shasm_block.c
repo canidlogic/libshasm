@@ -193,7 +193,7 @@ typedef struct {
 /*
  * Structure for storing decoding map overlay state.
  * 
- * Use the shasm_decoder_overlay functions to work with this structure.
+ * Use the shasm_block_dover functions to work with this structure.
  */
 typedef struct {
   
@@ -243,7 +243,7 @@ typedef struct {
    */
   long nest_level;
   
-} SHASM_DECODER_OVERLAY;
+} SHASM_BLOCK_DOVER;
 
 /* 
  * Local functions
