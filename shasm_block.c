@@ -276,6 +276,8 @@ static void shasm_block_dover_init(
     SHASM_BLOCK_DOVER *pdo,
     const SHASM_BLOCK_STRING *sp);
 static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest);
+static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo);
+static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -724,6 +726,54 @@ static void shasm_block_dover_init(
  */
 static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
   /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Return the unsigned byte value (0-255) of the most recent branch, or
+ * -1 if no branches from the root node in the decoding map have been
+ * taken yet.
+ * 
+ * The overlay structure must have been initialized with
+ * shasm_block_dover_init.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to query
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value (0-255) of the most recent branch, or -1 if
+ *   no branches taken yet
+ */
+static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Determine whether the current node in the decoding map is a "stop"
+ * node.
+ * 
+ * This function returns non-zero if at least one branch has been taken
+ * and the most recent branch was for a byte corresponding to the ASCII
+ * value of a "stop character."  Stop characters are defined as:
+ * 
+ * (1) For a '' string, the ' character
+ * (2) For a "" string, the " character
+ * (3) For a {} string, the { and } characters
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to query
+ * 
+ * Return:
+ * 
+ *   non-zero if the current node is a stop node; zero if it is not
+ */
+static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
 }
 
 /*
