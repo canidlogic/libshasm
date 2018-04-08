@@ -312,6 +312,58 @@ typedef struct {
   
 } SHASM_BLOCK_CIRCBUF;
 
+/*
+ * Structure for storing information relating to a speculation buffer.
+ * 
+ * Use the shasm_block_specbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The circular buffer used to store the data for the speculation
+   * buffer.
+   */
+  SHASM_BLOCK_CIRCBUF cb;
+  
+  /*
+   * The number of bytes in the back buffer.
+   * 
+   * The circular buffer is divided into a back buffer (comes first) and
+   * a front buffer (comes last).  Together the two buffers occupy the
+   * full space of the circular buffer.
+   * 
+   * The number of bytes in the front buffer is the current length of
+   * the circular buffer minus back_count.
+   * 
+   * The range of back_count is zero up to and including the current
+   * length of the circular buffer.
+   * 
+   * back_count must be zero if the marked flag is zero.
+   */
+  long back_count;
+  
+  /*
+   * The "mark" flag.
+   * 
+   * If non-zero, then there is a marked position that may be restored.
+   * The back_count may be zero or greater in this case.
+   * 
+   * If zero, then there is no marked position.  The back_count must be
+   * zero in this case.
+   */
+  int marked;
+  
+  /*
+   * The input filter stack that this speculation buffer is built on top
+   * of.
+   * 
+   * Undefined behavior occurs if the input filter stack is altered by
+   * the client while the speculation buffer is still in use.
+   */
+  SHASM_IFLSTATE *ps;
+  
+} SHASM_BLOCK_SPECBUF;
+
 /* 
  * Local functions
  * ===============
