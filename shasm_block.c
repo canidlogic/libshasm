@@ -90,6 +90,14 @@
 #define SHASM_BLOCK_UTF8_4MASK (0XF0)
 
 /*
+ * Nesting level change constants.
+ */
+#define SHASM_BLOCK_DOVER_NEST_STAY  (0)  /* Keep nesting level as-is */
+#define SHASM_BLOCK_DOVER_NEST_INC   (1)  /* Increment nesting level */
+#define SHASM_BLOCK_DOVER_NEST_DEC   (2)  /* Decrement nesting level */
+#define SHASM_BLOCK_DOVER_NEST_RESET (3)  /* Reset level to one */
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -190,6 +198,61 @@ typedef struct {
   
 } SHASM_BLOCK_TBUF;
 
+/*
+ * Structure for storing decoding map overlay state.
+ * 
+ * Use the shasm_block_dover functions to work with this structure.
+ */
+typedef struct {
+  
+  /*
+   * The decoding map that this overlay is set on top of.
+   */
+  SHASM_BLOCK_DECODER dec;
+  
+  /*
+   * The most recent branch taken, or -1 to indicate that no branches
+   * have been taken from root.
+   * 
+   * This starts out at -1 to indicate the decoding map is at the root
+   * node and no branches have been taken.
+   * 
+   * When a successful branch is taken, the unsigned byte value (0-255)
+   * of the branch is stored in this field.
+   */
+  int recent;
+  
+  /*
+   * The type of string currently being decoded.
+   * 
+   * This determines whether the string data is a "" '' or {} string.
+   * 
+   * It must be one of the SHASM_BLOCK_STYPE constants.
+   */
+  int stype;
+  
+  /*
+   * The input override mode of the string currently being decoded.
+   * 
+   * This must be one of the SHASM_BLOCK_IMODE constants.  Use the
+   * constant SHASM_BLOCK_IMODE_NONE if there are no input overrides.
+   */
+  int i_over;
+  
+  /*
+   * The bracket nesting level.
+   * 
+   * This starts out at one and may never go below one.  An error occurs
+   * if this reaches LONG_MAX.
+   * 
+   * The nesting level may only be changed in SHASM_BLOCK_STYPE_CURLY {}
+   * strings.  Faults occur if the nesting level is changed for other
+   * string types.
+   */
+  long nest_level;
+  
+} SHASM_BLOCK_DOVER;
+
 /* 
  * Local functions
  * ===============
@@ -207,6 +270,15 @@ static void shasm_block_tbuf_reset(SHASM_BLOCK_TBUF *pt);
 static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
 static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
+
+static void shasm_block_dover_init(
+    SHASM_BLOCK_DOVER *pdo,
+    const SHASM_BLOCK_STRING *sp);
+static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest);
+static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo);
+static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo);
+static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c);
+static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -583,6 +655,199 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
   
   /* Return length */
   return pt->len;
+}
+
+/*
+ * Initialize a decoding map overlay structure.
+ * 
+ * Provide the string type parameters to use to initialize the overlay
+ * structure.  All necessary information will be copied into the
+ * decoding map overlay structure.
+ * 
+ * The decoding map overlay structure does not need to be cleaned up or
+ * deinitialized in any way before being released.
+ * 
+ * The underlying decoding map will be reset to root position by this
+ * function.  Undefined behavior occurs if the underlying decoding map
+ * is accessed by anything besides this decoding map overlay while the
+ * overlay is in use.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay to initialize
+ * 
+ *   sp - the string type parameters to initialize the overlay with
+ */
+static void shasm_block_dover_init(
+    SHASM_BLOCK_DOVER *pdo,
+    const SHASM_BLOCK_STRING *sp) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset the position of a decoding map overlay back to the root node,
+ * possibly changing the nesting level.
+ * 
+ * The overlay structure must already have been initialized with
+ * shasm_block_dover_init.
+ * 
+ * The underlying decoding map will be reset back to the root node
+ * position, and the state of the overlay except for the nesting level
+ * will be reset to its initial value.
+ * 
+ * The nest parameter is one of the SHASM_BLOCK_DOVER_NEST constants,
+ * which specifies what to do with the nesting level on reset.
+ * 
+ * If STAY is specified, the nesting level stays at its current value.
+ * 
+ * If INC is specified, the nesting level increases by one.  This may
+ * only be used for {} string types; a fault occurs if it is specified
+ * for other string types.  The function fails if incrementing the
+ * nesting level would cause the level to rise to LONG_MAX.  If the
+ * function fails, the overlay structure is unmodified and not reset.
+ * 
+ * If DEC is specified, the nesting level decreases by one.  This may
+ * only be used for {} string types; a fault occurs if it is specified
+ * for other string types.  A fault occurs if this would cause the
+ * nesting level to decrease below one.
+ * 
+ * If RESET is specified, the nesting level is set to the initial value
+ * of one.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to reset
+ * 
+ *   nest - the nesting level code
+ * 
+ * Return:
+ * 
+ *   non-zero if successful; zero if failure due to nesting level
+ *   overflow
+ */
+static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Return the unsigned byte value (0-255) of the most recent branch, or
+ * -1 if no branches from the root node in the decoding map have been
+ * taken yet.
+ * 
+ * The overlay structure must have been initialized with
+ * shasm_block_dover_init.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to query
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value (0-255) of the most recent branch, or -1 if
+ *   no branches taken yet
+ */
+static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Determine whether the current node in the decoding map is a "stop"
+ * node.
+ * 
+ * This function returns non-zero if at least one branch has been taken
+ * and the most recent branch was for a byte corresponding to the ASCII
+ * value of a "stop character."  Stop characters are defined as:
+ * 
+ * (1) For a '' string, the ' character
+ * (2) For a "" string, the " character
+ * (3) For a {} string, the { and } characters
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding overlay to query
+ * 
+ * Return:
+ * 
+ *   non-zero if the current node is a stop node; zero if it is not
+ */
+static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Attempt to branch from the current node in the decoding overlay.
+ * 
+ * c is a unsigned byte value (0-255) to branch for.  If a branch for
+ * that byte value exists, the branch is taken and a non-zero value is
+ * returned.  If no branch for that byte value exists, the position
+ * stays on the current node and a zero value is returned.
+ * 
+ * Normally, this function calls through to the branch function of the
+ * underlying decoding map.  However, in the following cases, this
+ * overlay branch function will always return that no branch exists,
+ * regardless of whether one actually does in the underlying decoding
+ * map:
+ * 
+ * (1) If the current node is a stop node (shasm_block_dover_stopped),
+ * then the branch function always fails because there are no branches
+ * from a stop node.
+ * 
+ * (2) If the string type is "", then the branch corresponding to the
+ * ASCII value for " fails if it is attempted as the first branch from
+ * root position.
+ * 
+ * (3) If the string type is '', then the branch corresponding to the
+ * ASCII value for ' fails if it is attempted as the first branch from
+ * root position.
+ * 
+ * (4) If the string type is {} and the nesting level is one, then the
+ * branch corresponding to the ASCII value for } fails if it is
+ * attempted as the first branch from root position.
+ * 
+ * (5) If an input override mode is active, branches for byte values
+ * with the most significant bit set (128-255) always fail.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   c - the unsigned byte value (0-255) to branch for
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if no branch exists and the position
+ *   is unchanged
+ */
+static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Return the entity code associated with the current node, or -1 if
+ * there is no associated entity code.
+ * 
+ * This function normally calls through to the entity function of the
+ * underlying decoding map.  The only exception is that if no branches
+ * from root have been taken yet, this function always returns -1
+ * regardless of whether the underlying decoding map has an entity code
+ * associated with the empty key.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay to query
+ * 
+ * Return:
+ * 
+ *   the entity code associated with the current node, or -1 if there is
+ *   no associated entity code
+ */
+static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
 }
 
 /*
