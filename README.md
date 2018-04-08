@@ -165,7 +165,7 @@ See the "Regular string decoding algorithm" divergence earlier in this readme fo
 To reach the current goal, the following steps will be taken, in the order shown below:
 
 - [x] Define decoding overlay interface
-- [ ] Define circular queue interface
+- [x] Define circular queue interface
 - [ ] Define speculation buffer interface
 - [ ] Define inner decoding interfaces
 - [ ] Revise outer decoding interface

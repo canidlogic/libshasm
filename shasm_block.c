@@ -98,6 +98,12 @@
 #define SHASM_BLOCK_DOVER_NEST_RESET (3)  /* Reset level to one */
 
 /*
+ * The initial and maximum capacities of the circular buffer, in bytes.
+ */
+#define SHASM_BLOCK_CIRCBUF_INITCAP (8L)
+#define SHASM_BLOCK_CIRCBUF_MAXCAP  (32767L)
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -253,6 +259,59 @@ typedef struct {
   
 } SHASM_BLOCK_DOVER;
 
+/*
+ * Structure for storing information relating to a circular buffer.
+ * 
+ * Use the shasm_block_circbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * Pointer to the buffer.
+   * 
+   * The size in bytes of this buffer is stored in the bufcap field.  If
+   * bufcap is zero, then this field must be NULL.  Else, this field
+   * must point to a dynamically allocated buffer.
+   */
+  unsigned char *pBuf;
+  
+  /*
+   * Capacity of the buffer in bytes.
+   * 
+   * This starts out at zero for an empty buffer.  When the first byte
+   * is appended, the buffer is allocated at a size in bytes matching
+   * SHASM_BLOCK_CIRCBUF_INITCAP.  It then grows as necessary by
+   * doubling up to a maximum of SHASM_BLOCK_CIRCBUF_MAXCAP.
+   */
+  long bufcap;
+  
+  /*
+   * The number of bytes currently stored in the buffer.
+   * 
+   * This ranges from zero up to and including the value of the bufcap
+   * field.
+   */
+  long length;
+  
+  /*
+   * The byte index within the buffer of the byte that will be written
+   * next.
+   * 
+   * If the length field is greater than zero, then the last byte of the
+   * buffer will be at the offset (next - 1) if next is greater than
+   * zero, or (bufcap - 1) if next is zero.
+   * 
+   * If the length field is greater than zero, then the first byte of
+   * the buffer will be at the offset (next - length) if next is greater
+   * than or equal to length, or else (next - length + bufcap).
+   * 
+   * The range of this field is zero up to (bufcap - 1) if bufcap is
+   * greater than zero.  This field is always zero if bufcap is zero.
+   */
+  long next;
+  
+} SHASM_BLOCK_CIRCBUF;
+
 /* 
  * Local functions
  * ===============
@@ -279,6 +338,17 @@ static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo);
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo);
 static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c);
 static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo);
+
+static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb);
+static void shasm_block_circbuf_reset(
+    SHASM_BLOCK_CIRCBUF *pcb,
+    int full);
+static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c);
+static void shasm_block_circbuf_advance(
+    SHASM_BLOCK_CIRCBUF *pcb,
+    long d);
+static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
+static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -846,6 +916,143 @@ static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
  *   no associated entity code
  */
 static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Initialize a circular buffer structure.
+ * 
+ * Do not use this function on a buffer that has already been
+ * initialized or a memory leak may occur.  Use the reset function to
+ * reset a circular buffer that has already been initialized.
+ * 
+ * The circular buffer starts out empty.
+ * 
+ * Before the initialized circular buffer structure is released, be sure
+ * to call the reset function to release any dynamically allocated
+ * buffer that has been allocated.
+ * 
+ * Parameters:
+ * 
+ *   pcb - the uninitialized circular buffer to initialize
+ */
+static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset a circular buffer structure.
+ * 
+ * This operation clears the buffer back to empty.
+ * 
+ * If the full flag is non-zero, then a full reset is performed that
+ * releases any associated buffer.  If the full flag is zero, then a
+ * partial reset is performed that keeps the buffer allocated but just
+ * resets the statistics to empty the buffer.
+ * 
+ * A full reset must be done before releasing the circular buffer
+ * structure to avoid a memory leak.  Partial resets are recommended in
+ * all other cases because they are more efficient.
+ * 
+ * Parameters:
+ * 
+ *   pcb - the circular buffer to reset
+ * 
+ *   full - non-zero for a full reset, zero for a partial reset
+ */
+static void shasm_block_circbuf_reset(
+    SHASM_BLOCK_CIRCBUF *pcb,
+    int full) {
+  /* @@TODO: */
+}
+
+/*
+ * Append a byte to the end of a circular buffer.
+ * 
+ * The buffer is reallocated at a larger size if necessary.  If the
+ * buffer is full and at maximum capacity, then this function fails.
+ * 
+ * The provided byte value must be in unsigned range (0-255).
+ * 
+ * Parameters:
+ * 
+ *   pcb - the circular buffer
+ * 
+ *   c - the unsigned byte value (0-255) to append
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if no more capacity to append the byte
+ */
+static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Remove zero or more bytes from the start of a circular buffer.
+ * 
+ * The d parameter indicates how many bytes to remove.  It must be zero
+ * and no more than the length of the buffer (as determined by function
+ * shasm_block_circbuf_length).  If zero, then no operation is
+ * performed.  If greater than zero, then that many bytes are removed
+ * from the start of the buffer.
+ * 
+ * A fault occurs if d is greater than the current length of the buffer.
+ * 
+ * Parameters:
+ * 
+ *   pcb - the circular buffer
+ * 
+ *   d - the number of bytes to remove from the start of the buffer
+ */
+static void shasm_block_circbuf_advance(
+    SHASM_BLOCK_CIRCBUF *pcb,
+    long d) {
+  /* @@TODO: */
+}
+
+/*
+ * Return the current length of a circular buffer.
+ * 
+ * The return value is in range zero up to and including the constant
+ * SHASM_BLOCK_CIRCBUF_MAXCAP.
+ * 
+ * Parameters:
+ * 
+ *   pcb - the circular buffer to query
+ * 
+ * Return:
+ * 
+ *   the current number of bytes in the buffer
+ */
+static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Get a specific element within a circular buffer.
+ * 
+ * The index i is relative to the first element in the buffer, with zero
+ * as the first element, one as the second element, and so forth.  The
+ * range of i is zero up to and including one less than the current
+ * length of the buffer (shasm_block_circbuf_length).
+ * 
+ * A fault occurs if i is out of range.  This function always faults if
+ * it is called when the buffer is empty.
+ * 
+ * The return value is the unsigned value (0-255) of the byte at the
+ * requested position within the buffer.
+ * 
+ * Parameters:
+ * 
+ *   pcb - the circular buffer to query
+ * 
+ *   i - the offset of the element to request
+ */
+static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
   /* @@TODO: */
   return 0;
 }
