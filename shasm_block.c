@@ -402,6 +402,18 @@ static void shasm_block_circbuf_advance(
 static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
 
+/* @@TODO: */
+static void shasm_block_specbuf_init(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps);
+static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb);
+static int shasm_block_specbuf_detach(SHASM_BLOCK_SPECBUF *psb);
+static int shasm_block_specbuf_get(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb);
+
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
 static int shasm_block_ereg(
