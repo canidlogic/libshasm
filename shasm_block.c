@@ -271,13 +271,14 @@ static int shasm_block_tbuf_widen(SHASM_BLOCK_TBUF *pt, long tlen);
 static unsigned char *shasm_block_tbuf_ptr(SHASM_BLOCK_TBUF *pt);
 static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt);
 
-/* @@TODO: */
 static void shasm_block_dover_init(
     SHASM_BLOCK_DOVER *pdo,
     const SHASM_BLOCK_STRING *sp);
 static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest);
 static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo);
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo);
+static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c);
+static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -772,6 +773,79 @@ static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
  *   non-zero if the current node is a stop node; zero if it is not
  */
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Attempt to branch from the current node in the decoding overlay.
+ * 
+ * c is a unsigned byte value (0-255) to branch for.  If a branch for
+ * that byte value exists, the branch is taken and a non-zero value is
+ * returned.  If no branch for that byte value exists, the position
+ * stays on the current node and a zero value is returned.
+ * 
+ * Normally, this function calls through to the branch function of the
+ * underlying decoding map.  However, in the following cases, this
+ * overlay branch function will always return that no branch exists,
+ * regardless of whether one actually does in the underlying decoding
+ * map:
+ * 
+ * (1) If the current node is a stop node (shasm_block_dover_stopped),
+ * then the branch function always fails because there are no branches
+ * from a stop node.
+ * 
+ * (2) If the string type is "", then the branch corresponding to the
+ * ASCII value for " fails if it is attempted as the first branch from
+ * root position.
+ * 
+ * (3) If the string type is '', then the branch corresponding to the
+ * ASCII value for ' fails if it is attempted as the first branch from
+ * root position.
+ * 
+ * (4) If the string type is {} and the nesting level is one, then the
+ * branch corresponding to the ASCII value for } fails if it is
+ * attempted as the first branch from root position.
+ * 
+ * (5) If an input override mode is active, branches for byte values
+ * with the most significant bit set (128-255) always fail.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   c - the unsigned byte value (0-255) to branch for
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if no branch exists and the position
+ *   is unchanged
+ */
+static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Return the entity code associated with the current node, or -1 if
+ * there is no associated entity code.
+ * 
+ * This function normally calls through to the entity function of the
+ * underlying decoding map.  The only exception is that if no branches
+ * from root have been taken yet, this function always returns -1
+ * regardless of whether the underlying decoding map has an entity code
+ * associated with the empty key.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay to query
+ * 
+ * Return:
+ * 
+ *   the entity code associated with the current node, or -1 if there is
+ *   no associated entity code
+ */
+static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
   /* @@TODO: */
   return 0;
 }
