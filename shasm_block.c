@@ -98,6 +98,12 @@
 #define SHASM_BLOCK_DOVER_NEST_RESET (3)  /* Reset level to one */
 
 /*
+ * The initial and maximum capacities of the circular buffer, in bytes.
+ */
+#define SHASM_BLOCK_CIRCBUF_INITCAP (8L)
+#define SHASM_BLOCK_CIRCBUF_MAXCAP  (32767L)
+
+/*
  * SHASM_BLOCK structure for storing block reader state.
  * 
  * The prototype of this structure is given in the header.
@@ -253,6 +259,59 @@ typedef struct {
   
 } SHASM_BLOCK_DOVER;
 
+/*
+ * Structure for storing information relating to a circular buffer.
+ * 
+ * Use the shasm_block_circbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * Pointer to the buffer.
+   * 
+   * The size in bytes of this buffer is stored in the bufcap field.  If
+   * bufcap is zero, then this field must be NULL.  Else, this field
+   * must point to a dynamically allocated buffer.
+   */
+  unsigned char *pBuf;
+  
+  /*
+   * Capacity of the buffer in bytes.
+   * 
+   * This starts out at zero for an empty buffer.  When the first byte
+   * is appended, the buffer is allocated at a size in bytes matching
+   * SHASM_BLOCK_CIRCBUF_INITCAP.  It then grows as necessary by
+   * doubling up to a maximum of SHASM_BLOCK_CIRCBUF_MAXCAP.
+   */
+  long bufcap;
+  
+  /*
+   * The number of bytes currently stored in the buffer.
+   * 
+   * This ranges from zero up to and including the value of the bufcap
+   * field.
+   */
+  long length;
+  
+  /*
+   * The byte index within the buffer of the byte that will be written
+   * next.
+   * 
+   * If the length field is greater than zero, then the last byte of the
+   * buffer will be at the offset (next - 1) if next is greater than
+   * zero, or (bufcap - 1) if next is zero.
+   * 
+   * If the length field is greater than zero, then the first byte of
+   * the buffer will be at the offset (next - length) if next is greater
+   * than or equal to length, or else (next - length + bufcap).
+   * 
+   * The range of this field is zero up to (bufcap - 1) if bufcap is
+   * greater than zero.  This field is always zero if bufcap is zero.
+   */
+  long next;
+  
+} SHASM_BLOCK_CIRCBUF;
+
 /* 
  * Local functions
  * ===============
@@ -279,6 +338,16 @@ static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo);
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo);
 static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c);
 static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo);
+
+/* @@TODO: */
+static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb);
+static void shasm_block_circbuf_reset(SHASM_BLOCK_CIRCBUF *pcb);
+static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c);
+static void shasm_block_circbuf_advance(
+    SHASM_BLOCK_CIRCBUF *pcb,
+    long d);
+static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
+static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
