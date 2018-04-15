@@ -166,7 +166,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 
 - [x] Define decoding overlay interface
 - [x] Define circular queue interface
-- [ ] Define speculation buffer interface
+- [x] Define speculation buffer interface
 - [ ] Define inner decoding interfaces
 - [ ] Revise outer decoding interface
 - [ ] Write inner placeholders (return no entity)

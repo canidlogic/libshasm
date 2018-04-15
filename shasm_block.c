@@ -1249,11 +1249,74 @@ static int shasm_block_specbuf_get(
   return SHASM_INPUT_IOERR;
 }
 
-/* @@TODO: */
-static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
-static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
-static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
-static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb);
+/*
+ * Mark the current input position as a position that can be restored.
+ * 
+ * This function discards any bytes currently in the back buffer and
+ * sets the buffer to a marked state if not already marked.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Restore the most recently marked input position.
+ * 
+ * This function may only be called if the speculation buffer is in a
+ * marked state (shasm_block_specbuf_mark).  A fault occurs if the
+ * speculation buffer is unmarked.
+ * 
+ * Any bytes that are in the back buffer are transferred to the start of
+ * the front buffer.  The mark flag is then cleared.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Backtrack input by one character.
+ * 
+ * This operation uses the speculation buffer for backtracking.  It does
+ * not make use of the input filter stack's backtracking function.
+ * 
+ * This function may only be used if the speculation buffer is in a
+ * marked state and there is at least one byte in the back buffer.  This
+ * means that backtracking can go no further backwards than the most
+ * recent mark.
+ * 
+ * This function transfers one byte from the end of the back buffer to
+ * the start of the front buffer.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Remove any marks from the speculation buffer.
+ * 
+ * This operation is equivalent to marking the current position and then
+ * immediately restoring to the current position.  This has the effect
+ * of clearing any marks while leaving the input position unchanged.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
 
 /*
  * Encode a supplemental Unicode codepoint into a Surrogate pair.
