@@ -312,6 +312,49 @@ typedef struct {
   
 } SHASM_BLOCK_CIRCBUF;
 
+/*
+ * Structure for storing information relating to a speculation buffer.
+ * 
+ * Use the shasm_block_specbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The circular buffer used to store the data for the speculation
+   * buffer.
+   */
+  SHASM_BLOCK_CIRCBUF cb;
+  
+  /*
+   * The number of bytes in the back buffer.
+   * 
+   * The circular buffer is divided into a back buffer (comes first) and
+   * a front buffer (comes last).  Together the two buffers occupy the
+   * full space of the circular buffer.
+   * 
+   * The number of bytes in the front buffer is the current length of
+   * the circular buffer minus back_count.
+   * 
+   * The range of back_count is zero up to and including the current
+   * length of the circular buffer.
+   * 
+   * back_count must be zero if the marked flag is zero.
+   */
+  long back_count;
+  
+  /*
+   * The "mark" flag.
+   * 
+   * If non-zero, then there is a marked position that may be restored.
+   * The back_count may be zero or greater in this case.
+   * 
+   * If zero, then there is no marked position.  The back_count must be
+   * zero in this case.
+   */
+  int marked;
+  
+} SHASM_BLOCK_SPECBUF;
+
 /* 
  * Local functions
  * ===============
@@ -349,6 +392,19 @@ static void shasm_block_circbuf_advance(
     long d);
 static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
+
+static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb);
+static int shasm_block_specbuf_detach(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps);
+static int shasm_block_specbuf_get(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps);
+static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb);
 
 static void shasm_block_pair(long code, long *pHi, long *pLo);
 
@@ -1055,6 +1111,211 @@ static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
   /* @@TODO: */
   return 0;
+}
+
+/*
+ * Initialize a speculation buffer structure.
+ * 
+ * Do not use this function on a buffer that has already been
+ * initialized or a memory leak may occur.  Use the reset function to
+ * reset a speculation buffer that has already been initialized.
+ * 
+ * The speculation buffer starts out empty and unmarked.
+ * 
+ * Before the initialized speculation buffer structure is released, be
+ * sure to call the reset function to release any dynamically allocated
+ * buffer that has been allocated.
+ * 
+ * Parameters:
+ * 
+ *   psb - the uninitialized speculation buffer to initialize
+ */
+static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset a speculation buffer structure.
+ * 
+ * This operation performs a full reset of the underlying circular
+ * buffer, forcibly clearing all its contents.  If the detach function
+ * (shasm_block_specbuf_detach) has not been successfully called before
+ * performing a reset of the speculation buffer, buffered data may be
+ * discarded, causing a discontinuity between where the speculation
+ * buffer left off reading input and where the input filter stack starts
+ * out reading input.
+ * 
+ * The reset function must be called before releasing the speculation
+ * buffer structure to avoid a memory leak.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer to reset
+ */
+static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Detach a speculation buffer to synchronize it with the underlying
+ * input filter stream.
+ * 
+ * If the speculation buffer is unmarked and empty (its initial state),
+ * then this function returns successfully without doing anything.
+ * 
+ * If the speculation buffer is unmarked and exactly one byte is
+ * buffered in the (front) buffer, then this function backtracks the
+ * provided input filter stack by one character (shasm_input_back),
+ * empties the speculation buffer, and returns successfully.
+ * 
+ * (This case will fault if the passed input filter stack is already in
+ * pushback mode and can't be backtracked further.  However, this fault
+ * condition will never occur if the provided input filter stack has
+ * only been accessed by the speculation buffer, since the speculation
+ * buffer never backtracks the input filter stack except during detach
+ * operations after it has read and buffered at least one byte from the
+ * input filter stack.)
+ * 
+ * If the speculation buffer is marked or more than one byte is
+ * buffered, then this function fails without doing anything further.
+ * 
+ * If this function succeeds, then the speculation buffer will be back
+ * in its original state of empty and unmarked, and the input filter
+ * stack can begin reading input right where the speculation buffer left
+ * off.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer to detach
+ * 
+ *   ps - the input filter stack to detach from
+ * 
+ * Return:
+ * 
+ *   non-zero if successful detach, zero if detach failed
+ */
+static int shasm_block_specbuf_detach(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps) {
+  /* @@TODO: */
+  return 0;
+}
+
+/*
+ * Read a filtered byte through the speculation buffer.
+ * 
+ * If the buffer is unmarked and empty (its initial state), then a
+ * filtered byte is read from the provided input filter stack.  The
+ * return value of this read operation is passed directly through
+ * (including the SHASM_INPUT_EOF and SHASM_INPUT_IOERR returns) and the
+ * speculation buffer state is unmodified in this case.
+ * 
+ * If the buffer is unmarked and not empty, then the next buffered byte
+ * (at the start of the front buffer) is returned and removed from the
+ * speculation buffer.
+ * 
+ * If the buffer is marked and the front buffer is empty, then a
+ * filtered byte is read from the provided input filter stack.  If the
+ * input filter stack returns SHASM_INPUT_EOF or SHASM_INPUT_IOERR, then
+ * these special return codes are passed directly through without
+ * affecting the state of the speculation buffer.  Otherwise, the byte
+ * that was read is appended to the end of the back buffer and this byte
+ * is returned.  If the byte could not be appended because the buffer is
+ * filled to maximum capacity, then SHASM_INPUT_INVALID is returned; the
+ * input filter stack is not backtracked in this case and the input byte
+ * is discarded.
+ * 
+ * If the buffer is marked and the front buffer is not empty, then one
+ * byte is transferred from the start of the front buffer to the end of
+ * the back buffer, and this byte value is then returned.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value (0-255), or SHASM_INPUT_EOF if EOF read, or
+ *   SHASM_INPUT_IOERR if there was an I/O error, or SHASM_INPUT_INVALID
+ *   if input was discarded because maximum capacity of the buffer was
+ *   exceeded
+ */
+static int shasm_block_specbuf_get(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps) {
+  /* @@TODO: */
+  return SHASM_INPUT_IOERR;
+}
+
+/*
+ * Mark the current input position as a position that can be restored.
+ * 
+ * This function discards any bytes currently in the back buffer and
+ * sets the buffer to a marked state if not already marked.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Restore the most recently marked input position.
+ * 
+ * This function may only be called if the speculation buffer is in a
+ * marked state (shasm_block_specbuf_mark).  A fault occurs if the
+ * speculation buffer is unmarked.
+ * 
+ * Any bytes that are in the back buffer are transferred to the start of
+ * the front buffer.  The mark flag is then cleared.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Backtrack input by one character.
+ * 
+ * This operation uses the speculation buffer for backtracking.  It does
+ * not make use of the input filter stack's backtracking function.
+ * 
+ * This function may only be used if the speculation buffer is in a
+ * marked state and there is at least one byte in the back buffer.  This
+ * means that backtracking can go no further backwards than the most
+ * recent mark.
+ * 
+ * This function transfers one byte from the end of the back buffer to
+ * the start of the front buffer.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Remove any marks from the speculation buffer.
+ * 
+ * This operation is equivalent to marking the current position and then
+ * immediately restoring to the current position.  This has the effect
+ * of clearing any marks while leaving the input position unchanged.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ */
+static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
 }
 
 /*

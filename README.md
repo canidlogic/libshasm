@@ -104,7 +104,7 @@ The regular string decoder requires a more sophisticated buffer than the single-
 
 The speculation buffer has a "detach" function (described later) that empties the speculation buffer such that the input filter stack can pick up right where the speculation buffer left off.  This allows the speculation buffer to be used only where required, and for the rest the speculation buffer can be detached and Shastina can return to only using the single-byte pushback buffer in the input filter stack.
 
-The speculation buffer stores zero or more bytes before the current filtered input position.  The speculation buffer is divided into zero or more bytes in a "back" buffer followed by zero or more bytes in a "front" buffer.  Together, the back and front buffer fill the eniter speculation buffer, such that the bytes in the back buffer come first, followed by the bytes in the front buffer, followed by additional filtered input bytes read from the input filter stack.  The speculation buffer never uses the pushback buffer of the input filter stack, except during the detach operation as described later.
+The speculation buffer stores zero or more bytes before the current filtered input position.  The speculation buffer is divided into zero or more bytes in a "back" buffer followed by zero or more bytes in a "front" buffer.  Together, the back and front buffer fill the entire speculation buffer, such that the bytes in the back buffer come first, followed by the bytes in the front buffer, followed by additional filtered input bytes read from the input filter stack.  The speculation buffer never uses the pushback buffer of the input filter stack, except during the detach operation as described later.
 
 The speculation buffer starts out with both the back and front buffers empty.  There is also a "mark" flag that starts out clear.  If the mark flag is clear, then the back buffer must be empty.  (If the mark flag is set, the back buffer may be empty or it may have one or more bytes in it.)
 
@@ -166,7 +166,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 
 - [x] Define decoding overlay interface
 - [x] Define circular queue interface
-- [ ] Define speculation buffer interface
+- [x] Define speculation buffer interface
 - [ ] Define inner decoding interfaces
 - [ ] Revise outer decoding interface
 - [ ] Write inner placeholders (return no entity)
