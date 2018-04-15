@@ -393,7 +393,6 @@ static void shasm_block_circbuf_advance(
 static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
 
-/* @@TODO: */
 static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb);
 static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb);
 static int shasm_block_specbuf_detach(
@@ -1113,6 +1112,103 @@ static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
   /* @@TODO: */
   return 0;
 }
+
+/*
+ * Initialize a speculation buffer structure.
+ * 
+ * Do not use this function on a buffer that has already been
+ * initialized or a memory leak may occur.  Use the reset function to
+ * reset a speculation buffer that has already been initialized.
+ * 
+ * The speculation buffer starts out empty and unmarked.
+ * 
+ * Before the initialized speculation buffer structure is released, be
+ * sure to call the reset function to release any dynamically allocated
+ * buffer that has been allocated.
+ * 
+ * Parameters:
+ * 
+ *   psb - the uninitialized speculation buffer to initialize
+ */
+static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Reset a speculation buffer structure.
+ * 
+ * This operation performs a full reset of the underlying circular
+ * buffer, forcibly clearing all its contents.  If the detach function
+ * (shasm_block_specbuf_detach) has not been successfully called before
+ * performing a reset of the speculation buffer, buffered data may be
+ * discarded, causing a discontinuity between where the speculation
+ * buffer left off reading input and where the input filter stack starts
+ * out reading input.
+ * 
+ * The reset function must be called before releasing the speculation
+ * buffer structure to avoid a memory leak.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer to reset
+ */
+static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Detach a speculation buffer to synchronize it with the underlying
+ * input filter stream.
+ * 
+ * If the speculation buffer is unmarked and empty (its initial state),
+ * then this function returns successfully without doing anything.
+ * 
+ * If the speculation buffer is unmarked and exactly one byte is
+ * buffered in the (front) buffer, then this function backtracks the
+ * provided input filter stack by one character (shasm_input_back),
+ * empties the speculation buffer, and returns successfully.
+ * 
+ * (This case will fault if the passed input filter stack is already in
+ * pushback mode and can't be backtracked further.  However, this fault
+ * condition will never occur if the provided input filter stack has
+ * only been accessed by the speculation buffer, since the speculation
+ * buffer never backtracks the input filter stack except during detach
+ * operations after it has read and buffered at least one byte from the
+ * input filter stack.)
+ * 
+ * If the speculation buffer is marked or more than one byte is
+ * buffered, then this function fails without doing anything further.
+ * 
+ * If this function succeeds, then the speculation buffer will be back
+ * in its original state of empty and unmarked, and the input filter
+ * stack can begin reading input right where the speculation buffer left
+ * off.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer to detach
+ * 
+ *   ps - the input filter stack to detach from
+ * 
+ * Return:
+ * 
+ *   non-zero if successful detach, zero if detach failed
+ */
+static int shasm_block_specbuf_detach(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps) {
+  /* @@TODO: */
+  return 0;
+}
+
+/* @@TODO: */
+static int shasm_block_specbuf_get(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps);
+static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb);
 
 /*
  * Encode a supplemental Unicode codepoint into a Surrogate pair.
