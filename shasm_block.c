@@ -353,15 +353,6 @@ typedef struct {
    */
   int marked;
   
-  /*
-   * The input filter stack that this speculation buffer is built on top
-   * of.
-   * 
-   * Undefined behavior occurs if the input filter stack is altered by
-   * the client while the speculation buffer is still in use.
-   */
-  SHASM_IFLSTATE *ps;
-  
 } SHASM_BLOCK_SPECBUF;
 
 /* 
@@ -403,12 +394,14 @@ static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb);
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i);
 
 /* @@TODO: */
-static void shasm_block_specbuf_init(
+static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb);
+static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb);
+static int shasm_block_specbuf_detach(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps);
-static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb);
-static int shasm_block_specbuf_detach(SHASM_BLOCK_SPECBUF *psb);
-static int shasm_block_specbuf_get(SHASM_BLOCK_SPECBUF *psb);
+static int shasm_block_specbuf_get(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps);
 static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
 static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
 static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
