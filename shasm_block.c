@@ -1201,10 +1201,55 @@ static int shasm_block_specbuf_detach(
   return 0;
 }
 
-/* @@TODO: */
+/*
+ * Read a filtered byte through the speculation buffer.
+ * 
+ * If the buffer is unmarked and empty (its initial state), then a
+ * filtered byte is read from the provided input filter stack.  The
+ * return value of this read operation is passed directly through
+ * (including the SHASM_INPUT_EOF and SHASM_INPUT_IOERR returns) and the
+ * speculation buffer state is unmodified in this case.
+ * 
+ * If the buffer is unmarked and not empty, then the next buffered byte
+ * (at the start of the front buffer) is returned and removed from the
+ * speculation buffer.
+ * 
+ * If the buffer is marked and the front buffer is empty, then a
+ * filtered byte is read from the provided input filter stack.  If the
+ * input filter stack returns SHASM_INPUT_EOF or SHASM_INPUT_IOERR, then
+ * these special return codes are passed directly through without
+ * affecting the state of the speculation buffer.  Otherwise, the byte
+ * that was read is appended to the end of the back buffer and this byte
+ * is returned.  If the byte could not be appended because the buffer is
+ * filled to maximum capacity, then SHASM_INPUT_INVALID is returned; the
+ * input filter stack is not backtracked in this case and the input byte
+ * is discarded.
+ * 
+ * If the buffer is marked and the front buffer is not empty, then one
+ * byte is transferred from the start of the front buffer to the end of
+ * the back buffer, and this byte value is then returned.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ * Return:
+ * 
+ *   the unsigned byte value (0-255), or SHASM_INPUT_EOF if EOF read, or
+ *   SHASM_INPUT_IOERR if there was an I/O error, or SHASM_INPUT_INVALID
+ *   if input was discarded because maximum capacity of the buffer was
+ *   exceeded
+ */
 static int shasm_block_specbuf_get(
     SHASM_BLOCK_SPECBUF *psb,
-    SHASM_IFLSTATE *ps);
+    SHASM_IFLSTATE *ps) {
+  /* @@TODO: */
+  return SHASM_INPUT_IOERR;
+}
+
+/* @@TODO: */
 static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb);
 static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb);
 static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb);
