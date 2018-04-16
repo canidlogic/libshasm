@@ -426,6 +426,30 @@ static int shasm_block_encode(
     int o_strict,
     SHASM_BLOCK_TBUF *pt);
 
+/* @@TODO: */
+static long shasm_block_decode_inner(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    int *pStatus);
+
+static long shasm_block_decode_numeric(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    SHASM_BLOCK_ESCLIST *pel,
+    int *pStatus);
+
+static int shasm_block_decode_entities(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    SHASM_BLOCK_ESCLIST *pel,
+    int *pStatus);
+
 /*
  * Set a block reader into an error state.
  * 
