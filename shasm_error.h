@@ -65,4 +65,20 @@
  */
 #define SHASM_ERR_NUMESCSUR (8)
 
+/*
+ * The speculation buffer in the block reader exceeded maximum capacity.
+ * 
+ * This should only happen if a decoding map is provided that includes
+ * huge keys 32 kilobytes or greater in length.
+ */
+#define SHASM_ERR_OVERSPEC (9)
+
+/*
+ * A regular string of the {} type had too much curly bracket nesting.
+ * 
+ * This should only happen if there are literally billions of nesting
+ * levels within a regular string.
+ */
+#define SHASM_ERR_STRNEST (10)
+
 #endif
