@@ -2326,14 +2326,25 @@ static long shasm_block_decode_numeric(
   return -1;
 }
 
-/* @@TODO: */
+/*
+ * Decode a sequence of zero or more entity codes from input and send
+ * them to the encoding phase.
+ * 
+ * @@TODO: update parameters to take string format so encode function
+ * can be called
+ * 
+ * @@TODO: finish this specification
+ */
 static int shasm_block_decode_entities(
     SHASM_BLOCK_DOVER *pdo,
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps,
     int stype,
     SHASM_BLOCK_ESCLIST *pel,
-    int *pStatus);
+    int *pStatus) {
+  /* @@TODO: */
+  return 1;
+}
 
 /*
  * Public functions
