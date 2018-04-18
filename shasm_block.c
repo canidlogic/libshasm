@@ -2226,15 +2226,107 @@ static long shasm_block_decode_inner(
   return -1;
 }
 
-/* @@TODO: */
+/*
+ * Wrapper around shasm_block_decode_inner that adds support for numeric
+ * escapes.
+ * 
+ * The interface of this function is the same as for the function
+ * shasm_block_decode_inner, except that there's an extra parameter that
+ * specifies the numeric escape list object to query for numeric
+ * escapes, and this function may generate some additional error codes.
+ * 
+ * This function normally passes through all parameters (except the
+ * escape list) to the underlying inner function and returns the return
+ * value returned from that function.
+ * 
+ * The only exception is that if the inner function returns an entity
+ * code that matches a registered numeric escape, this function will
+ * read the numeric escape code from input through the speculation
+ * buffer, and then return the decoded numeric code instead of the
+ * original entity code received from the inner decoder.
+ * 
+ * The numeric decoder begins by marking the current position in the
+ * speculation buffer so that the backtracking function is available.
+ * 
+ * It then reads and decodes numeric digits from input (base-10 or
+ * base-16 depending on the setting for the numeric escape) until one of
+ * the following conditions occurs:
+ * 
+ * (1) A non-digit is encountered.  Digits are US-ASCII with letter
+ * digits case-insensitive (uppercase or lowercase).  Base-10 or base-16
+ * depending on the setting for this numeric escape type.
+ * 
+ * (2) SHASM_INPUT_EOF is encountered.
+ * 
+ * (3) SHASM_INPUT_IOERR is encountered.
+ * 
+ * (4) SHASM_INPUT_INVALID is encountered.
+ * 
+ * (5) The maximum digit count is reached.  This maximum count is
+ * determined by the setting for this numeric escape type.  If there is
+ * no maximum digit count for this type of numeric escape, then this
+ * condition will never occur.
+ * 
+ * (6) The decoded numeric value exceeds the maximum entity code.  The
+ * maximum entity code is determined by the setting for this numeric
+ * escape type.
+ * 
+ * Conditions (2)-(4) result in this function failing and setting an
+ * error code -- SHASM_ERR_EOF, SHASM_ERR_IO, SHASM_ERR_OVERSPEC,
+ * respectively.
+ * 
+ * Condition (6) results in this function failing and setting the error
+ * code SHASM_ERR_NUMESCRANGE.
+ * 
+ * For conditions (1) and (5), fail with SHASM_ERR_BADNUMESC if the
+ * number of digits read is not at least the minimum number of digits
+ * required by this particular escape, and fail with SHASM_ERR_NUMESCSUR
+ * if the escape code setting blocks surrogate codes but the decoded
+ * value is in surrogate range.  Otherwise, proceed.  However, before
+ * proceeding, backtrack one character for condition (1) to unread the
+ * non-digit character, and then in both cases unmark the speculation
+ * buffer.
+ * 
+ * Once a numeric escape has been decoded, if there is a terminal byte
+ * registered for this numeric escape, read another byte from the
+ * speculation buffer.  If this results in EOF, IOERR, or INVALID, fail
+ * with the same error codes listed above.  If this is a byte value that
+ * mismatches the registered terminal byte value, fail with the error
+ * SHASM_ERR_BADNUMESC.  Otherwise, return the numeric escape.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ *   stype - the string type constant
+ * 
+ *   pel - the numeric escape list
+ * 
+ *   pStatus - pointer to the error status field
+ * 
+ * Return:
+ * 
+ *   a decoded entity code (zero or greater), or -1 if no entity code
+ *   has been read and the speculation buffer has been detached, or -1
+ *   if there has been an error (distinguish between the two -1 cases
+ *   by checking the error status field for an error)
+ */
 static long shasm_block_decode_numeric(
     SHASM_BLOCK_DOVER *pdo,
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps,
     int stype,
     SHASM_BLOCK_ESCLIST *pel,
-    int *pStatus);
+    int *pStatus) {
+  /* @@TODO: */
+  return -1;
+}
 
+/* @@TODO: */
 static int shasm_block_decode_entities(
     SHASM_BLOCK_DOVER *pdo,
     SHASM_BLOCK_SPECBUF *psb,
