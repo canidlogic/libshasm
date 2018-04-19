@@ -442,12 +442,12 @@ static long shasm_block_decode_numeric(
     int *pStatus);
 
 static int shasm_block_decode_entities(
+    SHASM_BLOCK *pb,
     SHASM_BLOCK_DOVER *pdo,
     SHASM_BLOCK_SPECBUF *psb,
+    SHASM_BLOCK_TBUF *pt,
     SHASM_IFLSTATE *ps,
-    int stype,
-    SHASM_BLOCK_ESCLIST *pel,
-    int *pStatus);
+    const SHASM_BLOCK_STRING *sp);
 
 /*
  * Set a block reader into an error state.
@@ -2330,18 +2330,56 @@ static long shasm_block_decode_numeric(
  * Decode a sequence of zero or more entity codes from input and send
  * them to the encoding phase.
  * 
- * @@TODO: update parameters to take string format so encode function
- * can be called
+ * This function handles input bytes that can be decoded with the
+ * decoding map, as well as numeric escapes.  It does not handle
+ * built-in terminal keys and, if an input override is selected, it does
+ * not handle bytes with their most significant bit set to one.  This
+ * function will send all entities it decodes to the encoding phase
+ * (shasm_block_encode), and return when it encounters something it
+ * can't decode (or if there's an error).
  * 
- * @@TODO: finish this specification
+ * On a successful return, the speculation buffer will have been
+ * detached, so the caller can retry reading the byte that this function
+ * stopped on using the input filter chain.
+ * 
+ * The input overlay (pdo), speculation buffer (psb), and temporary
+ * buffer (pt) are not actually used to pass parameters or return
+ * values.  Rather, they are passed in for efficiency reasons so that
+ * they do not need to be continually allocated.  The caller should
+ * initialize each of these before the first call to this function, then
+ * just keep passing them into the function, and reset them
+ * appropriately and release them once done.
+ * 
+ * If the provided block reader is in an error state upon entry to this
+ * function, this function fails immediately.  Otherwise, if this
+ * function fails, it will set an appropriate error status in the
+ * provided block reader.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader object
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   pt - the temporary buffer
+ * 
+ *   ps - the input filter chain
+ * 
+ *   sp - the string type parameters
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if failure
  */
 static int shasm_block_decode_entities(
+    SHASM_BLOCK *pb,
     SHASM_BLOCK_DOVER *pdo,
     SHASM_BLOCK_SPECBUF *psb,
+    SHASM_BLOCK_TBUF *pt,
     SHASM_IFLSTATE *ps,
-    int stype,
-    SHASM_BLOCK_ESCLIST *pel,
-    int *pStatus) {
+    const SHASM_BLOCK_STRING *sp) {
   /* @@TODO: */
   return 1;
 }
