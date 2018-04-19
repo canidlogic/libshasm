@@ -426,6 +426,29 @@ static int shasm_block_encode(
     int o_strict,
     SHASM_BLOCK_TBUF *pt);
 
+static long shasm_block_decode_inner(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    int *pStatus);
+
+static long shasm_block_decode_numeric(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    SHASM_BLOCK_ESCLIST *pel,
+    int *pStatus);
+
+static int shasm_block_decode_entities(
+    SHASM_BLOCK *pb,
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_BLOCK_TBUF *pt,
+    SHASM_IFLSTATE *ps,
+    const SHASM_BLOCK_STRING *sp);
+
 /*
  * Set a block reader into an error state.
  * 
@@ -2059,6 +2082,306 @@ static int shasm_block_encode(
   
   /* Return status */
   return status;
+}
+
+/*
+ * The inner decoding function for regular string decoding.
+ * 
+ * Pass an initialized decoding map overlay to use for decoding.  This
+ * overlay may be in any position upon entry -- it will be reset by this
+ * function to root position at the beginning.  However, this function
+ * will preserve the nesting level upon entry, so the nesting level
+ * should be set properly.  The position in the decoding map overlay
+ * upon return will be at root position with a proper nesting level
+ * (unless there is an error, in which case the state of the decoding
+ * map overlay is undefined).
+ * 
+ * Also pass an initialized speculation buffer to use for decoding.  The
+ * buffer will be unmarked at the start of the function.  The provided
+ * input filter stack will be used in conjunction with the speculation
+ * buffer to read bytes that shall be decoded.  See later in this
+ * function specification for the state of the speculation buffer on
+ * return.
+ * 
+ * The stype parameter must be a SHASM_BLOCK_STYPE constant describing
+ * the type of string that is being decoded.
+ * 
+ * pStatus must not be NULL.  It points to the error status code, which
+ * should be one of the constants from shasm_error.  If *pStatus is not
+ * SHASM_OKAY upon entry to this function, this function fails
+ * immediately, returning -1, leaving the error status as it is, and
+ * performing no further operation.
+ * 
+ * If the return value is zero or greater, then the function has
+ * succeeded, *pStatus will be SHASM_OKAY, and the return value equals
+ * an entity code that has been decoded from input.  The speculation
+ * buffer will be unmarked in this state and ready to read the next byte
+ * of input.  It will not have been detached, however.
+ * 
+ * If the return value is -1 and *pStatus is SHASM_OKAY, then the
+ * function has succeeded but it hasn't managed to decode another entity
+ * code.  In this case, the speculation buffer will be unmarked and
+ * detached, so that the next input byte can be read from the input
+ * filter stack.
+ * 
+ * If the return value is -1 and *pStatus is not SHASM_OKAY, then the
+ * function has failed and *pStatus holds the error code.  The state of
+ * the speculation buffer in this case is undefined.
+ * 
+ * The decoding algorithm is described below.  Note that this function
+ * does not handle numeric escapes.
+ * 
+ * Before beginning, the function unmarks the speculation buffer and
+ * resets the decoding map overlay to root position (preserving the
+ * nesting level, however).  It also sets an internal nesting level
+ * alteration variable to zero, indicating no nesting change.
+ * 
+ * The decoding loop begins by reading a byte from the input through the
+ * speculation buffer.  EOF or IOERR returns result in the function
+ * failing on SHASM_ERR_EOF or SHASM_ERR_IO.  INVALID returns (which
+ * indicate a speculation buffer overflow) result in the function
+ * failing on SHASM_ERR_OVERSPEC.
+ * 
+ * Then, the decoding loop clears an internal stop flag.  It sets an
+ * internal first branch flag if the decoding map is at root position,
+ * otherwise clearing the internal first branch flag.
+ * 
+ * Next, the loop attempts to branch in the decoding map overlay
+ * according to the byte that was just read.
+ * 
+ * If branching succeeds and the new overlay position has an associated
+ * entity code, the speculation buffer is marked and the entity code is
+ * remembered as the largest candidate entity code (overwriting any
+ * previous candidates).
+ * 
+ * If branching succeeds and the new overlay position is a stop node,
+ * then the stop flag is set.
+ * 
+ * If branching succeeds, and the string type is {}, and the first
+ * branch flag is set, and the most recent branch was for { or } then
+ * set the internal nesting level alteration variable to increment or
+ * decrement.
+ * 
+ * If branching fails, set the stop flag.
+ * 
+ * Keep looping until the stop flag is set (or there is an error).
+ * 
+ * After the loop completes, check whether a candidate entity code has
+ * been recorded.  If one has, restore the speculation buffer to the
+ * most recently marked position and return the candidate entity code.
+ * If no candidate entity code has been recorded, then attempt to detach
+ * the speculation buffer.  If the detach succeeds, return successfully
+ * that no entity code has been read.  If the detach fails, then this
+ * function fails with SHASM_ERR_STRCHAR.
+ * 
+ * Before returning, the decoding map overlay is reset, possibly
+ * changing the nesting level in the process, depending on the setting
+ * of the internal nesting level alteration variable.  If the reset
+ * fails due to nesting level overflow, this function fails on the error
+ * SHASM_ERR_STRNEST.
+ * 
+ * A summary of the errors this function may generate:
+ * 
+ * - SHASM_ERR_EOF if an EOF was encountered in input.
+ * - SHASM_ERR_IO if there was an I/O error reading input.
+ * - SHASM_ERR_OVERSPEC if the speculation buffer overflowed.
+ * - SHASM_ERR_STRCHAR if an input byte can't be decoded (*see below).
+ * - SHASM_ERR_STRNEST if the curly nesting level overflowed.
+ * 
+ * For SHASM_ERR_STRNEST, this function only generates that error if it
+ * can't decode something and it is not possible to detach the
+ * speculation buffer to give the caller another chance to decode the
+ * bytes using the input filter stack.  The stop node system and the
+ * kinds of decoding keys that are ignored by the decoding map overlay
+ * should ensure that if SHASM_ERR_STRNEST is generated, the bytes
+ * couldn't have been decoded by a built-in key or an input override,
+ * either.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ *   stype - the string type constant
+ * 
+ *   pStatus - pointer to the error status field
+ * 
+ * Return:
+ * 
+ *   a decoded entity code (zero or greater), or -1 if no entity code
+ *   has been read and the speculation buffer has been detached, or -1
+ *   if there has been an error (distinguish between the two -1 cases
+ *   by checking the error status field for an error)
+ */
+static long shasm_block_decode_inner(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    int *pStatus) {
+  /* @@TODO: */
+  return -1;
+}
+
+/*
+ * Wrapper around shasm_block_decode_inner that adds support for numeric
+ * escapes.
+ * 
+ * The interface of this function is the same as for the function
+ * shasm_block_decode_inner, except that there's an extra parameter that
+ * specifies the numeric escape list object to query for numeric
+ * escapes, and this function may generate some additional error codes.
+ * 
+ * This function normally passes through all parameters (except the
+ * escape list) to the underlying inner function and returns the return
+ * value returned from that function.
+ * 
+ * The only exception is that if the inner function returns an entity
+ * code that matches a registered numeric escape, this function will
+ * read the numeric escape code from input through the speculation
+ * buffer, and then return the decoded numeric code instead of the
+ * original entity code received from the inner decoder.
+ * 
+ * The numeric decoder begins by marking the current position in the
+ * speculation buffer so that the backtracking function is available.
+ * 
+ * It then reads and decodes numeric digits from input (base-10 or
+ * base-16 depending on the setting for the numeric escape) until one of
+ * the following conditions occurs:
+ * 
+ * (1) A non-digit is encountered.  Digits are US-ASCII with letter
+ * digits case-insensitive (uppercase or lowercase).  Base-10 or base-16
+ * depending on the setting for this numeric escape type.
+ * 
+ * (2) SHASM_INPUT_EOF is encountered.
+ * 
+ * (3) SHASM_INPUT_IOERR is encountered.
+ * 
+ * (4) SHASM_INPUT_INVALID is encountered.
+ * 
+ * (5) The maximum digit count is reached.  This maximum count is
+ * determined by the setting for this numeric escape type.  If there is
+ * no maximum digit count for this type of numeric escape, then this
+ * condition will never occur.
+ * 
+ * (6) The decoded numeric value exceeds the maximum entity code.  The
+ * maximum entity code is determined by the setting for this numeric
+ * escape type.
+ * 
+ * Conditions (2)-(4) result in this function failing and setting an
+ * error code -- SHASM_ERR_EOF, SHASM_ERR_IO, SHASM_ERR_OVERSPEC,
+ * respectively.
+ * 
+ * Condition (6) results in this function failing and setting the error
+ * code SHASM_ERR_NUMESCRANGE.
+ * 
+ * For conditions (1) and (5), fail with SHASM_ERR_BADNUMESC if the
+ * number of digits read is not at least the minimum number of digits
+ * required by this particular escape, and fail with SHASM_ERR_NUMESCSUR
+ * if the escape code setting blocks surrogate codes but the decoded
+ * value is in surrogate range.  Otherwise, proceed.  However, before
+ * proceeding, backtrack one character for condition (1) to unread the
+ * non-digit character, and then in both cases unmark the speculation
+ * buffer.
+ * 
+ * Once a numeric escape has been decoded, if there is a terminal byte
+ * registered for this numeric escape, read another byte from the
+ * speculation buffer.  If this results in EOF, IOERR, or INVALID, fail
+ * with the same error codes listed above.  If this is a byte value that
+ * mismatches the registered terminal byte value, fail with the error
+ * SHASM_ERR_BADNUMESC.  Otherwise, return the numeric escape.
+ * 
+ * Parameters:
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ *   stype - the string type constant
+ * 
+ *   pel - the numeric escape list
+ * 
+ *   pStatus - pointer to the error status field
+ * 
+ * Return:
+ * 
+ *   a decoded entity code (zero or greater), or -1 if no entity code
+ *   has been read and the speculation buffer has been detached, or -1
+ *   if there has been an error (distinguish between the two -1 cases
+ *   by checking the error status field for an error)
+ */
+static long shasm_block_decode_numeric(
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int stype,
+    SHASM_BLOCK_ESCLIST *pel,
+    int *pStatus) {
+  /* @@TODO: */
+  return -1;
+}
+
+/*
+ * Decode a sequence of zero or more entity codes from input and send
+ * them to the encoding phase.
+ * 
+ * This function handles input bytes that can be decoded with the
+ * decoding map, as well as numeric escapes.  It does not handle
+ * built-in terminal keys and, if an input override is selected, it does
+ * not handle bytes with their most significant bit set to one.  This
+ * function will send all entities it decodes to the encoding phase
+ * (shasm_block_encode), and return when it encounters something it
+ * can't decode (or if there's an error).
+ * 
+ * On a successful return, the speculation buffer will have been
+ * detached, so the caller can retry reading the byte that this function
+ * stopped on using the input filter chain.
+ * 
+ * The input overlay (pdo), speculation buffer (psb), and temporary
+ * buffer (pt) are not actually used to pass parameters or return
+ * values.  Rather, they are passed in for efficiency reasons so that
+ * they do not need to be continually allocated.  The caller should
+ * initialize each of these before the first call to this function, then
+ * just keep passing them into the function, and reset them
+ * appropriately and release them once done.
+ * 
+ * If the provided block reader is in an error state upon entry to this
+ * function, this function fails immediately.  Otherwise, if this
+ * function fails, it will set an appropriate error status in the
+ * provided block reader.
+ * 
+ * Parameters:
+ * 
+ *   pb - the block reader object
+ * 
+ *   pdo - the decoding map overlay
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   pt - the temporary buffer
+ * 
+ *   ps - the input filter chain
+ * 
+ *   sp - the string type parameters
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if failure
+ */
+static int shasm_block_decode_entities(
+    SHASM_BLOCK *pb,
+    SHASM_BLOCK_DOVER *pdo,
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_BLOCK_TBUF *pt,
+    SHASM_IFLSTATE *ps,
+    const SHASM_BLOCK_STRING *sp) {
+  /* @@TODO: */
+  return 1;
 }
 
 /*
