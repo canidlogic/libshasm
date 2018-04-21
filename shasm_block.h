@@ -791,10 +791,6 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
  * The provided input filter chain may be in pushback mode when passed
  * to this function.
  * 
- * See the documentation of SHASM_BLOCK_STRING and its embedded
- * structures for further specifics of how regular string reading works
- * beyond the overview given in the discussion below.
- * 
  * The opening quote or bracket (either a double quote, apostrophe, or
  * opening curly bracket) is assumed to have occurred at the end of the
  * token that indicated that string data follows.  Therefore, this
@@ -803,86 +799,27 @@ int shasm_block_token(SHASM_BLOCK *pb, SHASM_IFLSTATE *ps);
  * quote or bracket of the string data *is* included in the string data,
  * so after this function concludes the next character read will be the
  * character that comes immediately after the closing quote or bracket.
+ *  
+ * The output bytes are placed into the block buffer.  If the operation
+ * is successful, then the input filter chain will be positioned to read
+ * the byte immediately after closing quote or bracket of the string
+ * data that was just read, the block reader's buffer will contain the
+ * output string data, and the line number of the most recent block will
+ * be set to the line number of the input reader at the start of the
+ * string data.
  * 
- * Regular string reading has two different phases.  In the first phase,
- * called the "decoding phase," filtered characters read from the input
- * filter chain are converted into entity codes.  In the second phase,
- * called the "encoding phase," entity codes read from the decoding
- * phase are converted into output bytes that are then written into the
- * block reader's buffer to represent the final output value of the
- * string.
+ * If the operation fails, an error code will be recorded, available
+ * through shasm_block_status.  The following error codes are possible:
  * 
- * In the decoding phase, the input override (if active) has top
- * priority for converting filtered input into entity codes.  The
- * decoding map has a lower priority for conversion than the input
- * override.  In order to convert filtered bytes into entity codes, the
- * top priority method will be consulted first.  If that method fails to
- * produce an entity code, then the lower priority method will be
- * consulted (if there is a lower priority method).
- * 
- * If no entity code can be found by input override or decoding map,
- * then a check will be made if the filtered byte in question is a
- * terminal byte.  In "" strings, the terminal byte is the ASCII
- * character for a double quote.  In '' strings, the terminal byte is
- * the ASCII character for an apostrophe.  In {} strings, the terminal
- * byte is the ASCII character for a closing curly bracket.  The
- * terminal byte ends the string data.  It does not produce an entity
- * code.
- * 
- * If no entity code can be found by input override or decoding map,
- * and the filtered byte doesn't match the terminal byte for the string
- * type, then an error of type SHASM_ERR_STRINGCHAR will occur.
- * 
- * Before being passed to the encoding phase, entity codes are checked
- * to see if they match a numeric escape entity code.  If they do, then
- * the entity code is not sent to the encoder.  Instead, a sequence of
- * base-10 or base-16 ASCII digits (depending on the particular numeric
- * escape) is read from input, and the numeric value of these digits is
- * used as the entity code, which is then sent to the encoding phase.
- * 
- * In the encoding phase, the output override (if active) has top
- * priority for converted entity codes into output bytes.  The encoding
- * table has a lower priority for conversion than the output override.
- * In order to convert entity codes into output bytes, the top priority
- * method will be consulted first.  If the entity code range of that
- * method does not cover the entity code provided, then the lower
- * priority method will be consulted (if there is a lower priority
- * method).  Entity codes that are unrecognized are ignored and produce
- * no output bytes.
- * 
- * The output bytes that the encoding phase produces are then placed
- * into the block buffer.  If the operation is successful, then the
- * input filter chain will be positioned to read the byte immediately
- * after closing quote or bracket of the string data that was just read.
- * The block reader's buffer will contain the output string data.  The
- * line number of the most recent block will be set to the line number
- * of the input reader at the start of the string data.
- * 
- * The operation may fail for the following reasons:
- * 
- * (1) If the block reader was already in an error state when this
- * function is called, the function fails without changing the error
- * state.
- * 
- * (2) If there is an I/O error, SHASM_ERR_IO.
- * 
- * (3) If EOF is encountered, SHASM_ERR_EOF.
- * 
- * (4) If the result string literal is more than 32,766 bytes long,
- * SHASM_ERR_HUGEBLOCK.
- * 
- * (5) If a filtered byte of string data can't be decoded, the error
- * SHASM_ERR_STRINGCHAR occurs.
- *
- * (6) If there's a problem with the syntax of a numeric escape,
- * SHASM_ERR_BADNUMESC.
- * 
- * (7) If a numeric escape selects an entity code value that's too high,
- * SHASM_ERR_NUMESCRANGE.
- * 
- * (8) If a numeric escape selects an entity code value in Unicode
- * surrogate range when surrogates are not allowed by the particular
- * numeric escape, SHASM_ERR_NUMESCSUR.
+ * - SHASM_ERR_EOF if an EOF was encountered in input.
+ * - SHASM_ERR_IO if there was an I/O error reading input.
+ * - SHASM_ERR_OVERSPEC if the speculation buffer overflowed.
+ * - SHASM_ERR_STRCHAR if an input byte can't be decoded.
+ * - SHASM_ERR_STRNEST if the curly nesting level overflowed.
+ * - SHASM_ERR_NUMESCRANGE if a numeric escape was out of range.
+ * - SHASM_ERR_BADNUMESC if there was an invalid numeric escape.
+ * - SHASM_ERR_NUMESCSUR if an illegal numeric escape surrogate occurs.
+ * - SHASM_ERR_HUGEBLOCK if the output string is too large.
  * 
  * Parameters:
  * 
