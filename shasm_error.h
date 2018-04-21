@@ -45,7 +45,7 @@
 /*
  * A regular string contained a byte that couldn't be decoded.
  */
-#define SHASM_ERR_STRINGCHAR (5)
+#define SHASM_ERR_STRCHAR (5)
 
 /*
  * A numeric escape within a regular string had an improper format.
