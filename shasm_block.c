@@ -449,6 +449,17 @@ static int shasm_block_decode_entities(
     SHASM_IFLSTATE *ps,
     const SHASM_BLOCK_STRING *sp);
 
+static int shasm_block_noesc(
+    void *pCustom,
+    long entity,
+    SHASM_BLOCK_NUMESCAPE *pParam);
+
+static long shasm_block_nomap(
+    void *pCustom,
+    long entity,
+    unsigned char *pBuf,
+    long buf_len);
+
 /*
  * Set a block reader into an error state.
  * 
@@ -2385,6 +2396,87 @@ static int shasm_block_decode_entities(
 }
 
 /*
+ * Implementation of a numeric escape callback that returns no escapes.
+ * 
+ * This function merely verifies that entity is non-negative and then
+ * returns zero.  It is used when the client passes a NULL function
+ * pointer for the numeric escape, indicating no numeric escapes are
+ * needed.
+ * 
+ * Parameters:
+ * 
+ *   pCustom - (ignored)
+ * 
+ *   entity - (ignored; must not be negative)
+ * 
+ *   pParam - (ignored)
+ * 
+ * Return:
+ * 
+ *   zero, indicating no escape
+ */
+static int shasm_block_noesc(
+    void *pCustom,
+    long entity,
+    SHASM_BLOCK_NUMESCAPE *pParam) {
+  
+  /* Ignore parameters */
+  (void) pCustom;
+  (void) pParam;
+  
+  /* Check entity */
+  if (entity < 0) {
+    abort();
+  }
+  
+  /* Return zero */
+  return 0;
+}
+
+/*
+ * Implementation of an encoding map callback that always returns empty
+ * keys.
+ * 
+ * This function merely verifies that entity is non-negative and then
+ * returns zero.  It is used when the client passes a NULL function
+ * pointer for the encoding map, indicating there are no keys in the
+ * encoding map.
+ * 
+ * Parameters:
+ * 
+ *   pCustom - (ignored)
+ * 
+ *   entity - (ignored; must not be negative)
+ * 
+ *   pBuf - (ignored)
+ * 
+ *   buf_len - (ignored)
+ * 
+ * Return:
+ * 
+ *   zero, indicating no output sequence
+ */
+static long shasm_block_nomap(
+    void *pCustom,
+    long entity,
+    unsigned char *pBuf,
+    long buf_len) {
+  
+  /* Ignore parameters */
+  (void) pCustom;
+  (void) pBuf;
+  (void) buf_len;
+  
+  /* Check entity */
+  if (entity < 0) {
+    abort();
+  }
+  
+  /* Return zero */
+  return 0;
+}
+
+/*
  * Public functions
  * ================
  * 
@@ -2791,148 +2883,182 @@ int shasm_block_string(
     SHASM_BLOCK *pb,
     SHASM_IFLSTATE *ps,
     const SHASM_BLOCK_STRING *sp) {
-  /* @@TODO: placeholder */
-  /*
-   * For the moment, we're going to try to encode the following testing
-   * sequence, which is meant to exercise the encode function:
-   * 
-   *   'H'
-   *   'i'
-   *   '~'
-   *   '$'
-   *       0xA2 (cent sign)
-   *     0x20AC (euro sign)
-   *    0x10348 (gothic letter hwair)
-   *       0xDF (eszett)
-   *       0x0A (line feed)
-   *   0x200005 (special key #5 defined in the test encoding table)
-   *     0xD801 (unpaired surrogate)
-   *    0x10437 (deseret small letter yee)
-   *    0x24B62 (unknown supplemental codepoint)
-   *   '!'
-   * 
-   * Some of the supplemental characters chosen match examples given on
-   * the Wikipedia pages for UTF-8 and UTF-16, such that the example
-   * encodings can be checked against the output of our encoder.
-   */
   
   int status = 1;
-  SHASM_BLOCK_TBUF tb;
+  int c = 0;
+  int ct = 0;
+  SHASM_BLOCK_STRING sparam;
+  SHASM_BLOCK_DOVER dover;
+  SHASM_BLOCK_SPECBUF specbuf;
+  SHASM_BLOCK_TBUF tbuf;
   
-  /* Initialize buffer */
-  shasm_block_tbuf_init(&tb);
+  /* Initialize structures -- dover not initialized properly yet */
+  memset(&sparam, 0, sizeof(SHASM_BLOCK_STRING));
+  memset(&dover, 0, sizeof(SHASM_BLOCK_DOVER));
+  shasm_block_specbuf_init(&specbuf);
+  shasm_block_tbuf_init(&tbuf);
   
   /* Check parameters */
   if ((pb == NULL) || (ps == NULL) || (sp == NULL)) {
     abort();
   }
   
-  /* Send test entity codes */
+  /* Copy string parameters over to new structure, checking for valid
+   * values as copying, and filling in allowable NULL function pointers
+   * with references to local functions */
+  if ((sp->stype == SHASM_BLOCK_STYPE_DQUOTE) ||
+      (sp->stype == SHASM_BLOCK_STYPE_SQUOTE) ||
+      (sp->stype == SHASM_BLOCK_STYPE_CURLY)) {
+    sparam.stype = sp->stype;
+  } else {
+    abort();
+  }
+  
+  if ((sp->dec.fpReset != NULL) &&
+      (sp->dec.fpBranch != NULL) &&
+      (sp->dec.fpEntity != NULL)) {
+    sparam.dec.pCustom = sp->dec.pCustom;
+    sparam.dec.fpReset = sp->dec.fpReset;
+    sparam.dec.fpBranch = sp->dec.fpBranch;
+    sparam.dec.fpEntity = sp->dec.fpEntity;
+  } else {
+    abort();
+  }
+  
+  if ((sp->i_over == SHASM_BLOCK_IMODE_NONE) ||
+      (sp->i_over == SHASM_BLOCK_IMODE_UTF8)) {
+    sparam.i_over = sp->i_over;
+  } else {
+    abort();
+  }
+  
+  if (sp->elist.fpEscQuery != NULL) {
+    sparam.elist.pCustom = sp->elist.pCustom;
+    sparam.elist.fpEscQuery = sp->elist.fpEscQuery;
+  } else {
+    sparam.elist.pCustom = NULL;
+    sparam.elist.fpEscQuery = &shasm_block_noesc;
+  }
+  
+  if (sp->enc.fpMap != NULL) {
+    sparam.enc.pCustom = sp->enc.pCustom;
+    sparam.enc.fpMap = sp->enc.fpMap;
+  } else {
+    sparam.enc.pCustom = NULL;
+    sparam.enc.fpMap = &shasm_block_nomap;
+  }
+  
+  if ((sp->o_over == SHASM_BLOCK_OMODE_NONE) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_UTF8) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_CESU8) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_U16LE) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_U16BE) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_U32LE) ||
+      (sp->o_over == SHASM_BLOCK_OMODE_U32BE)) {
+    sparam.o_over = sp->o_over;
+  } else {
+    abort();
+  }
+  
+  if (sp->o_strict) {
+    sparam.o_strict = 1;
+  } else {
+    sparam.o_strict = 0;
+  }
+  
+  /* Initialize dover with the string parameters */
+  shasm_block_dover_init(&dover, &sparam);
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+
+  /* Set the line number to the current position and clear the block
+   * reader's buffer to empty */
   if (status) {
-    if (!shasm_block_encode(pb, 'H',
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
+    pb->line = shasm_input_count(ps);
+    shasm_block_clear(pb);
+  }
+  
+  /* Begin the decoding loop */
+  while (status) {
+    
+    /* Handle zero or more normal entities */
+    if (!shasm_block_decode_entities(
+            pb, &dover, &specbuf, &tbuf, ps, &sparam)) {
       status = 0;
+    }
+    
+    /* Read the character that normal entity decoding stopped on */
+    if (status) {
+      c = shasm_input_get(ps);
+      if (c == SHASM_INPUT_EOF) {
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+      } else if (c == SHASM_INPUT_IOERR) {
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+      }
+    }
+    
+    /* If the character has its most significant bit set and an input
+     * override is active, then unread the character and decode a
+     * sequence of entities according to the input override; else the
+     * character must be a terminal */
+    if (status && (c >= 0x80) &&
+          (sparam.i_over != SHASM_BLOCK_IMODE_NONE)) {
+      /* Use input override -- but unread character that was just read
+       * before activating override */
+      shasm_input_back(ps);
+      
+      /* Currently only UTF-8 input override is supported */
+      if (sparam.i_over != SHASM_BLOCK_IMODE_UTF8) {
+        abort();
+      }
+      
+      /* @@TODO: read a sequence of UTF-8 from input and send entities
+       * to encoder */
+      abort();
+    
+    } else {
+      /* Not an input override, so this must be a terminal -- set ct to
+       * the terminal character that is appropriate for this type of
+       * string */
+      if (sparam.stype == SHASM_BLOCK_STYPE_DQUOTE) {
+        /* Double quote string -- terminal should be double quote */
+        ct = SHASM_ASCII_DQUOTE;
+        
+      } else if (sparam.stype == SHASM_BLOCK_STYPE_SQUOTE) {
+        /* Single quote string -- terminal should be single quote */
+        ct = SHASM_ASCII_SQUOTE;
+        
+      } else if (sparam.stype == SHASM_BLOCK_STYPE_CURLY) {
+        /* Curly string -- terminal should be right curly */
+        ct = SHASM_ASCII_RCURL;
+        
+      } else {
+        /* Unsupported string type */
+        abort();
+      }
+      
+      /* Make sure character that was read matches ct, raising
+       * SHASM_ERR_STRCHAR if it does not */
+      if (c != ct) {
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+      }
+      
+      /* Terminal read, so break out of decoding loop */
+      if (status) {
+        break;
+      }
     }
   }
   
-  if (status) {
-    if (!shasm_block_encode(pb, 'i',
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, '~',
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, '$',
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0xA2L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0x20ACL,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0x10348L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0xDFL,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0xAL,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0x200005L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0xD801L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0x10437L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, 0x24B62L,
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  if (status) {
-    if (!shasm_block_encode(pb, '!',
-          &(sp->enc), sp->o_over, sp->o_strict, &tb)) {
-      status = 0;
-    }
-  }
-  
-  /* Set error state if error occurred */
-  if (!status) {
-    shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
-  }
-  
-  /* Reset temporary buffer */
-  shasm_block_tbuf_reset(&tb);
+  /* Reset specbuf and tbuf to free any additional memory */
+  shasm_block_specbuf_reset(&specbuf);
+  shasm_block_tbuf_reset(&tbuf);
   
   /* Return status */
   return status;
