@@ -27,6 +27,7 @@
 #define SHASM_ASCII_RSQR      (0x5d)  /* ] */
 #define SHASM_ASCII_LCURL     (0x7b)  /* { */
 #define SHASM_ASCII_BAR       (0x7c)  /* | */
+#define SHASM_ASCII_RCURL     (0x7d)  /* } */
 
 /* Relevant ranges */
 #define SHASM_ASCII_VISPRINT_MIN (0x21) /* visible, printing US-ASCII */
