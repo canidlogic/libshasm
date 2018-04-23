@@ -134,6 +134,10 @@ The outermost inner decoding function calls through to the numeric escape wrappe
 
 The outer decoding function is built around the inner decoding functions.  Unlike the inner decoding functions, it does not use the speculation buffer but rather handles everything with the pushback buffer of the input filter stack.  Its loop begins by calling the outermost inner decoding function to decode a sequence of zero or more entities (including numeric escaped entities) and send those to the encoder.  Then, it picks up where the inner decoding functions left off and tries to interpret the data using the built-in keys.  The built-in keys include the terminal (closing single or double quote or closing curly bracket) for the particular string type, and, if an input override is active, sequences of bytes with their most significant bit set.  If a terminal key is encountered, the decoder finishes.  If an input override key is encountered, the decoder decodes one or more filtered input bytes according to the input override, sending the decoded entities to the encoder.  It then loops back to the beginning.
 
+### 2.7 Input override surrogate handling
+
+In section 5.1 of draft 3V:C4-5 of the Shastina Specification, it is specified that when input override mode is active, improperly paired surrogates encoded in UTF-8 will be passed through to the encoder as-is.  In libshasm, improperly paired surrogates are not allowed during input override decoding, and their presence causes an error.
+
 ## 3. Roadmap
 The current development roadmap is as follows.  Section references are to the Shastina language specification, currently on draft 3V:C4-5.
 
@@ -171,7 +175,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Revise outer decoding interface
 - [x] Write inner placeholders (return no entity)
 - [x] Write outer function with terminal keys only
-- [ ] Add input override support to outer function
+- [x] Add input override support to outer function
 - [ ] Write outermost inner function
 - [ ] Implement circular queue
 - [ ] Implement speculation buffer

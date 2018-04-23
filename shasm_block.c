@@ -84,10 +84,19 @@
 /*
  * The leading byte masks for 2-byte, 3-byte, and 4-byte UTF-8
  * encodings.
+ * 
+ * The "XMASK" has one additional bit set than the 4MASK.  It is used
+ * during UTF-8 decoding.
+ * 
+ * To check a whether a given leading byte has one of the masks, first
+ * bitwise AND the mask with the next higher mask (using XMASK to check
+ * against 4MASK).  Then, compared the masked result with the desired
+ * mask to see if there's a match.
  */
 #define SHASM_BLOCK_UTF8_2MASK (0xC0)
 #define SHASM_BLOCK_UTF8_3MASK (0xE0)
 #define SHASM_BLOCK_UTF8_4MASK (0XF0)
+#define SHASM_BLOCK_UTF8_XMASK (0xF8)
 
 /*
  * Nesting level change constants.
@@ -355,6 +364,38 @@ typedef struct {
   
 } SHASM_BLOCK_SPECBUF;
 
+/*
+ * Structure for storing information related to the surrogate buffer.
+ * 
+ * Use the shasm_block_surbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The buffered surrogate, or zero if there is no buffered surrogate,
+   * or -1 if the surrogate buffer is in an error condition.
+   * 
+   * This field starts out zero, to indicate that no surrogate is
+   * buffered and there is no error.
+   * 
+   * If a low surrogate is encountered when this field has a high
+   * surrogate, then surrogates are paired to select a supplemental
+   * codepoint and this buffer is then cleared.  Encountering a low
+   * surrogate when this buffer is empty causes the buffer to go into
+   * error state since the surrogate is unpaired.
+   * 
+   * If a high surrogate is encountered when this field is empty, then
+   * it is stored in the buffer.  If a high surrogate is encountered
+   * when this field already has a high surrogate in it, then the buffer
+   * changes to error state on account of improperly paired surrogates.
+   * 
+   * At the end of input, if this buffer has a high surrogate within it,
+   * it changes to error state on account of an unpaired surrogate.
+   */
+  long buf;
+  
+} SHASM_BLOCK_SURBUF;
+
 /* 
  * Local functions
  * ===============
@@ -459,6 +500,14 @@ static long shasm_block_nomap(
     long entity,
     unsigned char *pBuf,
     long buf_len);
+
+static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb);
+static long shasm_block_surbuf_process(
+    SHASM_BLOCK_SURBUF *psb,
+    long v);
+static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb);
+
+static long shasm_block_read_utf8(SHASM_IFLSTATE *ps);
 
 /*
  * Set a block reader into an error state.
@@ -2477,6 +2526,363 @@ static long shasm_block_nomap(
 }
 
 /*
+ * Initialize a surrogate buffer.
+ * 
+ * This function may also be used to reset a surrogate buffer back to
+ * its initial state.  Surrogate buffers do not need to be deinitialized
+ * or cleaned up in any way before releasing.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer
+ */
+static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb) {
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(psb, 0, sizeof(SHASM_BLOCK_SURBUF));
+  psb->buf = 0;
+}
+
+/*
+ * Process a Unicode codepoint through a surrogate buffer.
+ * 
+ * The provided codepoint v must be in range zero up to and including
+ * SHASM_BLOCK_MAXCODE.
+ * 
+ * If the surrogate buffer is already in an error state when this
+ * function is called, this function will return -1 indicating an error.
+ * 
+ * Otherwise, processing depends on whether the surrogate buffer has a
+ * high surrogate buffered or whether it is empty.
+ * 
+ * If the surrogate buffer is empty, then the function will return a
+ * non-surrogate codepoint as-is.  A high surrogate will be buffered and
+ * -2 will be returned indicating that no codepoint should be sent
+ * further yet.  A low surrogate will cause the surrogate buffer to
+ * change to error state and -1 will be returned, indicating an
+ * improperly paired surrogate.
+ * 
+ * If the surrogate buffer has a high surrogate buffered, then the
+ * function will combine a low surrogate with the high surrogate to
+ * form a supplemental codepoint, return the supplemental codepoint, and
+ * clear the buffer.  If the surrogate buffer encounters a high
+ * surrogate or a non-surrogate when a high surrogate is buffered, the
+ * surrogate buffer will transition to error state and -1 will be
+ * returned, indicating an improperly paired surrogate.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer
+ * 
+ *   v - the codepoint to process
+ * 
+ * Return:
+ * 
+ *   a fully processed codepoint, or -1 indicating an improperly paired
+ *   surrogate, or -2 indicating that there is no fully processed
+ *   codepoint to report
+ */
+static long shasm_block_surbuf_process(
+    SHASM_BLOCK_SURBUF *psb,
+    long v) {
+  
+  int status = 1;
+  long result = 0;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (v < 0) || (v > SHASM_BLOCK_MAXCODE)) {
+    abort();
+  }
+  
+  /* Fail immediately if surrogate buffer in error state */
+  if (psb->buf < 0) {
+    status = 0;
+  }
+  
+  /* Handle the different buffer states */
+  if (status && (psb->buf == 0)) {
+    /* Surrogate buffer is empty -- handle different codepoints */
+    if ((v >= SHASM_BLOCK_HISURROGATE) &&
+          (v < SHASM_BLOCK_LOSURROGATE)) {
+      /* When surrogate buffer empty, buffer a high surrogate */
+      psb->buf = v;
+      result = -2;
+      
+    } else if ((v >= SHASM_BLOCK_LOSURROGATE) &&
+                (v <= SHASM_BLOCK_MAXSURROGATE)) {
+      /* When surrogate buffer empty, low surrogate is an error */
+      status = 0;
+    
+    } else {
+      /* When surrogate buffer empty, return non-surrogate as-is */
+      result = v;
+    }
+    
+  } else if (status) {
+    /* Surrogate buffer has a high surrogate buffered -- handle
+     * different codepoints */
+    if ((v >= SHASM_BLOCK_HISURROGATE) &&
+          (v < SHASM_BLOCK_LOSURROGATE)) {
+      /* When surrogate buffer has a high surrogate, another high
+       * surrogate is an error */
+      status = 0;
+      
+    } else if ((v >= SHASM_BLOCK_LOSURROGATE) &&
+                (v <= SHASM_BLOCK_MAXSURROGATE)) {
+      /* Surrogate buffer has high surrogate and now a low surrogate is
+       * provided -- decode into a supplemental codepoint, return that,
+       * and clear the buffer */
+      result = (psb->buf - SHASM_BLOCK_HISURROGATE) << 10;
+      result |= (v - SHASM_BLOCK_LOSURROGATE);
+      psb->buf = 0;
+      
+    } else {
+      /* When surrogate buffer has a high surrogate, a non-surrogate is
+       * an error */
+      status = 0;
+    }
+  }
+  
+  /* If error, set error status in buffer and set result to -1 */
+  if (!status) {
+    psb->buf = -1;
+    result = -1;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Verify that the surrogate buffer is in an appropriate final state.
+ * 
+ * If the surrogate buffer is in an error state, then this function
+ * returns zero indicating the surrogate buffer is not in an acceptable
+ * final state.
+ * 
+ * Otherwise, if the surrogate buffer is empty, then this function
+ * returns non-zero indicating the surrogate buffer is in an acceptable
+ * final state.  If the surrogate buffer has a high surrogate buffered,
+ * the buffer transitions to an error state and zero is returned,
+ * indicating an improperly paired surrogate.
+ * 
+ * After a successful return, the surrogate buffer will be in its
+ * initial state, and it can be reused again.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer to check
+ * 
+ * Return:
+ * 
+ *   non-zero if surrogate buffer is in an acceptable final state, zero
+ *   if not
+ */
+static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb) {
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fail immediately if surrogate buffer in error state */
+  if (psb->buf < 0) {
+    status = 0;
+  }
+  
+  /* Fail, setting error state, if buffer has a high surrogate
+   * buffered */
+  if (status && (psb->buf != 0)) {
+    psb->buf = -1;
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Decode an extended UTF-8 codepoint from input, if possible.
+ * 
+ * This function only reads UTF-8 for codepoints in range 0x80 up to and
+ * including 0x10ffff.  It will return surrogates as-is, without pairing
+ * surrogates together to get the supplemental code points.
+ * 
+ * This function begins by reading a byte from the input filter stack.
+ * If this results in an EOF or IOERR, then the function fails on that
+ * error condition.  Otherwise, if the byte read has its most
+ * significant bit clear, the function unreads the byte and returns zero
+ * indicating that there is no extended UTF-8 codepoint to read.
+ * 
+ * If the function successfully reads a byte with its most significant
+ * bit set, then function will either successfully read a UTF-8
+ * codepoint and return it, or it will return an error.  This function
+ * checks for overlong encodings and treats them as errors.
+ * 
+ * The return value is either zero, indicating that no extended UTF-8
+ * codepoint was present to read, or a value greater than or equal to
+ * 0x80, indicating an extended UTF-8 codepoint was read, or the value
+ * SHASM_INPUT_EOF or SHASM_INPUT_IOERR if EOF or IOERR was encountered
+ * while reading, or SHASM_INPUT_INVALID if the UTF-8 code was invalid.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter stack to read from
+ * 
+ * Return:
+ * 
+ *   zero if no extended UTF-8 present, greater than zero for an
+ *   extended UTF-8 codepoint that was read, SHASM_INPUT_EOF for EOF
+ *   encountered, SHASM_INPUT_IOERR if I/O error, or SHASM_INPUT_INVALID
+ *   if the UTF-8 was invalid
+ */
+static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
+  
+  int status = 1;
+  int c = 0;
+  int x = 0;
+  int clen = 0;
+  long result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read a byte to figure out what to do */
+  c = shasm_input_get(ps);
+  if (c == SHASM_INPUT_EOF) {
+    status = 0;
+    result = SHASM_INPUT_EOF;
+  } else if (c == SHASM_INPUT_IOERR) {
+    status = 0;
+    result = SHASM_INPUT_IOERR;
+  }
+  
+  /* Determine whether to read an extended UTF-8 codepoint */
+  if (status && (c >= 0x80)) {
+    /* Byte has its most significant bit set, so we're reading a UTF-8
+     * codepoint -- first figure out whether this is a 2-byte, 3-byte,
+     * or 4-byte sequence */
+    if ((c & SHASM_BLOCK_UTF8_3MASK) == SHASM_BLOCK_UTF8_2MASK) {
+      /* 2-byte sequence */
+      clen = 2;
+    
+    } else if ((c & SHASM_BLOCK_UTF8_4MASK) == SHASM_BLOCK_UTF8_3MASK) {
+      /* 3-byte sequence */
+      clen = 3;
+      
+    } else if ((c & SHASM_BLOCK_UTF8_XMASK) == SHASM_BLOCK_UTF8_4MASK) {
+      /* 4-byte sequence */
+      clen = 4;
+      
+    } else {
+      /* Illegal leading byte */
+      status = 0;
+      result = SHASM_INPUT_INVALID;
+    }
+    
+    /* The decoded value starts out with the bits of the leading byte,
+     * with the mask bits toggled off */
+    if (status) {
+      if (clen == 2) {
+        /* Mask off the 2-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_2MASK;
+      
+      } else if (clen == 3) {
+        /* Mask off the 3-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_3MASK;
+        
+      } else if (clen == 4) {
+        /* Mask off the 4-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_4MASK;
+      
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+    }
+    
+    /* Now add the bits in each of the trailing bytes */
+    if (status) {
+      for(x = 1; x < clen; x++) {
+        /* Read a trailing byte */
+        c = shasm_input_get(ps);
+        if (c == SHASM_INPUT_EOF) {
+          status = 0;
+          result = SHASM_INPUT_EOF;
+        } else if (c == SHASM_INPUT_IOERR) {
+          status = 0;
+          result = SHASM_INPUT_IOERR;
+        }
+        
+        /* Make sure the byte is marked as a trailing byte */
+        if (status && ((c & SHASM_BLOCK_UTF8_2MASK) != 0x80)) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+        /* Undo the trailing byte mask and add the six bits to the
+         * decoded value */
+        if (status) {
+          c ^= 0x80;
+          result = (result << 6) | c;
+        }
+        
+        /* Break if there was any error */
+        if (!status) {
+          break;
+        }
+      }
+    }
+    
+    /* Finally, check for and fail on overlong encodings */
+    if (status) {
+      if (clen == 2) {
+        /* Verify 2-byte range */
+        if (result < SHASM_BLOCK_UTF8_2BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else if (clen == 3) {
+        /* Verify 3-byte range */
+        if (result < SHASM_BLOCK_UTF8_3BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else if (clen == 4) {
+        /* Verify 4-byte range */
+        if (result < SHASM_BLOCK_UTF8_4BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+    }
+  
+  } else if (status) {
+    /* Byte has its most significant bit clear, so unread the byte and
+     * return zero to indicate no extended UTF-8 codepoint present */
+    shasm_input_back(ps);
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
  * Public functions
  * ================
  * 
@@ -2887,16 +3293,19 @@ int shasm_block_string(
   int status = 1;
   int c = 0;
   int ct = 0;
+  long v = 0;
   SHASM_BLOCK_STRING sparam;
   SHASM_BLOCK_DOVER dover;
   SHASM_BLOCK_SPECBUF specbuf;
   SHASM_BLOCK_TBUF tbuf;
+  SHASM_BLOCK_SURBUF sbuf;
   
   /* Initialize structures -- dover not initialized properly yet */
   memset(&sparam, 0, sizeof(SHASM_BLOCK_STRING));
   memset(&dover, 0, sizeof(SHASM_BLOCK_DOVER));
   shasm_block_specbuf_init(&specbuf);
   shasm_block_tbuf_init(&tbuf);
+  shasm_block_surbuf_init(&sbuf);
   
   /* Check parameters */
   if ((pb == NULL) || (ps == NULL) || (sp == NULL)) {
@@ -3017,9 +3426,63 @@ int shasm_block_string(
         abort();
       }
       
-      /* @@TODO: read a sequence of UTF-8 from input and send entities
-       * to encoder */
-      abort();
+      /* Read a sequence of zero or more extended UTF-8 codepoints from
+       * input, passing them through the surrogate buffer before sending
+       * them to the encoder */
+      while (status) {
+        
+        /* Read an extended UTF-8 codepoint */
+        v = shasm_block_read_utf8(ps);
+        if (v == SHASM_INPUT_EOF) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+        } else if (v == SHASM_INPUT_IOERR) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+        } else if (v == SHASM_INPUT_INVALID) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+        }
+        
+        /* If no extended codepoint was read, break out of the loop */
+        if (status && (v == 0)) {
+          break;
+        }
+        
+        /* Extended codepoint read, so pass it through the surrogate
+         * buffer */
+        if (status) {
+          v = shasm_block_surbuf_process(&sbuf, v);
+          if (v == -1) {
+            status = 0;
+            shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+          }
+        }
+        
+        /* If the surrogate buffer returns a codepoint, pass that
+         * through to the encoding phase */
+        if (status && (v != -2)) {
+          if (!shasm_block_encode(
+                  pb,
+                  v,
+                  &(sparam.enc),
+                  sparam.o_over,
+                  sparam.o_strict,
+                  &tbuf)) {
+            status = 0;
+            shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
+          }
+        }
+      }
+      
+      /* Finish the surrogate buffer, raising an error if an unpaired
+       * high surrogate is still buffered */
+      if (status) {
+        if (!shasm_block_surbuf_finish(&sbuf)) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+        }
+      }
     
     } else {
       /* Not an input override, so this must be a terminal -- set ct to
