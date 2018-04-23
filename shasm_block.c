@@ -2526,7 +2526,14 @@ static long shasm_block_nomap(
  *   psb - the surrogate buffer
  */
 static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb) {
-  /* @@TODO: */
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(psb, 0, sizeof(SHASM_BLOCK_SURBUF));
+  psb->buf = 0;
 }
 
 /*
@@ -2571,7 +2578,72 @@ static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb) {
 static long shasm_block_surbuf_process(
     SHASM_BLOCK_SURBUF *psb,
     long v) {
-  /* @@TODO: */
+  
+  int status = 1;
+  long result = 0;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (v < 0) || (v > SHASM_BLOCK_MAXCODE)) {
+    abort();
+  }
+  
+  /* Fail immediately if surrogate buffer in error state */
+  if (psb->buf < 0) {
+    status = 0;
+  }
+  
+  /* Handle the different buffer states */
+  if (status && (psb->buf == 0)) {
+    /* Surrogate buffer is empty -- handle different codepoints */
+    if ((v >= SHASM_BLOCK_HISURROGATE) &&
+          (v < SHASM_BLOCK_LOSURROGATE)) {
+      /* When surrogate buffer empty, buffer a high surrogate */
+      psb->buf = v;
+      result = -2;
+      
+    } else if ((v >= SHASM_BLOCK_LOSURROGATE) &&
+                (v <= SHASM_BLOCK_MAXSURROGATE)) {
+      /* When surrogate buffer empty, low surrogate is an error */
+      status = 0;
+    
+    } else {
+      /* When surrogate buffer empty, return non-surrogate as-is */
+      result = v;
+    }
+    
+  } else if (status) {
+    /* Surrogate buffer has a high surrogate buffered -- handle
+     * different codepoints */
+    if ((v >= SHASM_BLOCK_HISURROGATE) &&
+          (v < SHASM_BLOCK_LOSURROGATE)) {
+      /* When surrogate buffer has a high surrogate, another high
+       * surrogate is an error */
+      status = 0;
+      
+    } else if ((v >= SHASM_BLOCK_LOSURROGATE) &&
+                (v <= SHASM_BLOCK_MAXSURROGATE)) {
+      /* Surrogate buffer has high surrogate and now a low surrogate is
+       * provided -- decode into a supplemental codepoint, return that,
+       * and clear the buffer */
+      result = (psb->buf - SHASM_BLOCK_HISURROGATE) << 10;
+      result |= (v - SHASM_BLOCK_LOSURROGATE);
+      psb->buf = 0;
+      
+    } else {
+      /* When surrogate buffer has a high surrogate, a non-surrogate is
+       * an error */
+      status = 0;
+    }
+  }
+  
+  /* If error, set error status in buffer and set result to -1 */
+  if (!status) {
+    psb->buf = -1;
+    result = -1;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -2600,7 +2672,28 @@ static long shasm_block_surbuf_process(
  *   if not
  */
 static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb) {
-  /* @@TODO: */
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fail immediately if surrogate buffer in error state */
+  if (psb->buf < 0) {
+    status = 0;
+  }
+  
+  /* Fail, setting error state, if buffer has a high surrogate
+   * buffered */
+  if (status && (psb->buf != 0)) {
+    psb->buf = -1;
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
