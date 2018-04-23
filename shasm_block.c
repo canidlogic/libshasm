@@ -3149,16 +3149,19 @@ int shasm_block_string(
   int status = 1;
   int c = 0;
   int ct = 0;
+  long v = 0;
   SHASM_BLOCK_STRING sparam;
   SHASM_BLOCK_DOVER dover;
   SHASM_BLOCK_SPECBUF specbuf;
   SHASM_BLOCK_TBUF tbuf;
+  SHASM_BLOCK_SURBUF sbuf;
   
   /* Initialize structures -- dover not initialized properly yet */
   memset(&sparam, 0, sizeof(SHASM_BLOCK_STRING));
   memset(&dover, 0, sizeof(SHASM_BLOCK_DOVER));
   shasm_block_specbuf_init(&specbuf);
   shasm_block_tbuf_init(&tbuf);
+  shasm_block_surbuf_init(&sbuf);
   
   /* Check parameters */
   if ((pb == NULL) || (ps == NULL) || (sp == NULL)) {
@@ -3279,9 +3282,63 @@ int shasm_block_string(
         abort();
       }
       
-      /* @@TODO: read a sequence of UTF-8 from input and send entities
-       * to encoder */
-      abort();
+      /* Read a sequence of zero or more extended UTF-8 codepoints from
+       * input, passing them through the surrogate buffer before sending
+       * them to the encoder */
+      while (status) {
+        
+        /* Read an extended UTF-8 codepoint */
+        v = shasm_block_read_utf8(ps);
+        if (v == SHASM_INPUT_EOF) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_EOF);
+        } else if (v == SHASM_INPUT_IOERR) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_IO);
+        } else if (v == SHASM_INPUT_INVALID) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+        }
+        
+        /* If no extended codepoint was read, break out of the loop */
+        if (status && (v == 0)) {
+          break;
+        }
+        
+        /* Extended codepoint read, so pass it through the surrogate
+         * buffer */
+        if (status) {
+          v = shasm_block_surbuf_process(&sbuf, v);
+          if (v == -1) {
+            status = 0;
+            shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+          }
+        }
+        
+        /* If the surrogate buffer returns a codepoint, pass that
+         * through to the encoding phase */
+        if (status && (v != -2)) {
+          if (!shasm_block_encode(
+                  pb,
+                  v,
+                  &(sparam.enc),
+                  sparam.o_over,
+                  sparam.o_strict,
+                  &tbuf)) {
+            status = 0;
+            shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
+          }
+        }
+      }
+      
+      /* Finish the surrogate buffer, raising an error if an unpaired
+       * high surrogate is still buffered */
+      if (status) {
+        if (!shasm_block_surbuf_finish(&sbuf)) {
+          status = 0;
+          shasm_block_seterr(pb, ps, SHASM_ERR_STRCHAR);
+        }
+      }
     
     } else {
       /* Not an input override, so this must be a terminal -- set ct to
