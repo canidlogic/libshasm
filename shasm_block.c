@@ -498,6 +498,8 @@ static long shasm_block_surbuf_process(
     long v);
 static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb);
 
+static long shasm_block_read_utf8(SHASM_IFLSTATE *ps);
+
 /*
  * Set a block reader into an error state.
  * 
@@ -2694,6 +2696,46 @@ static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb) {
   
   /* Return status */
   return status;
+}
+
+/*
+ * Decode an extended UTF-8 codepoint from input, if possible.
+ * 
+ * This function only reads UTF-8 for codepoints in range 0x80 up to and
+ * including 0x10ffff.  It will return surrogates as-is, without pairing
+ * surrogates together to get the supplemental code points.
+ * 
+ * This function begins by reading a byte from the input filter stack.
+ * If this results in an EOF or IOERR, then the function fails on that
+ * error condition.  Otherwise, if the byte read has its most
+ * significant bit clear, the function unreads the byte and returns zero
+ * indicating that there is no extended UTF-8 codepoint to read.
+ * 
+ * If the function successfully reads a byte with its most significant
+ * bit set, then function will either successfully read a UTF-8
+ * codepoint and return it, or it will return an error.  This function
+ * checks for overlong encodings and treats them as errors.
+ * 
+ * The return value is either zero, indicating that no extended UTF-8
+ * codepoint was present to read, or a value greater than or equal to
+ * 0x80, indicating an extended UTF-8 codepoint was read, or the value
+ * SHASM_INPUT_EOF or SHASM_INPUT_IOERR if EOF or IOERR was encountered
+ * while reading, or SHASM_INPUT_INVALID if the UTF-8 code was invalid.
+ * 
+ * Parameters:
+ * 
+ *   ps - the input filter stack to read from
+ * 
+ * Return:
+ * 
+ *   zero if no extended UTF-8 present, greater than zero for an
+ *   extended UTF-8 codepoint that was read, SHASM_INPUT_EOF for EOF
+ *   encountered, SHASM_INPUT_IOERR if I/O error, or SHASM_INPUT_INVALID
+ *   if the UTF-8 was invalid
+ */
+static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
+  /* @@TODO: */
+  abort();
 }
 
 /*
