@@ -175,7 +175,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Revise outer decoding interface
 - [x] Write inner placeholders (return no entity)
 - [x] Write outer function with terminal keys only
-- [ ] Add input override support to outer function
+- [x] Add input override support to outer function
 - [ ] Write outermost inner function
 - [ ] Implement circular queue
 - [ ] Implement speculation buffer

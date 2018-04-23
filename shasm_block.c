@@ -84,10 +84,19 @@
 /*
  * The leading byte masks for 2-byte, 3-byte, and 4-byte UTF-8
  * encodings.
+ * 
+ * The "XMASK" has one additional bit set than the 4MASK.  It is used
+ * during UTF-8 decoding.
+ * 
+ * To check a whether a given leading byte has one of the masks, first
+ * bitwise AND the mask with the next higher mask (using XMASK to check
+ * against 4MASK).  Then, compared the masked result with the desired
+ * mask to see if there's a match.
  */
 #define SHASM_BLOCK_UTF8_2MASK (0xC0)
 #define SHASM_BLOCK_UTF8_3MASK (0xE0)
 #define SHASM_BLOCK_UTF8_4MASK (0XF0)
+#define SHASM_BLOCK_UTF8_XMASK (0xF8)
 
 /*
  * Nesting level change constants.
@@ -2734,8 +2743,143 @@ static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb) {
  *   if the UTF-8 was invalid
  */
 static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
-  /* @@TODO: */
-  abort();
+  
+  int status = 1;
+  int c = 0;
+  int x = 0;
+  int clen = 0;
+  long result = 0;
+  
+  /* Check parameter */
+  if (ps == NULL) {
+    abort();
+  }
+  
+  /* Read a byte to figure out what to do */
+  c = shasm_input_get(ps);
+  if (c == SHASM_INPUT_EOF) {
+    status = 0;
+    result = SHASM_INPUT_EOF;
+  } else if (c == SHASM_INPUT_IOERR) {
+    status = 0;
+    result = SHASM_INPUT_IOERR;
+  }
+  
+  /* Determine whether to read an extended UTF-8 codepoint */
+  if (status && (c >= 0x80)) {
+    /* Byte has its most significant bit set, so we're reading a UTF-8
+     * codepoint -- first figure out whether this is a 2-byte, 3-byte,
+     * or 4-byte sequence */
+    if ((c & SHASM_BLOCK_UTF8_3MASK) == SHASM_BLOCK_UTF8_2MASK) {
+      /* 2-byte sequence */
+      clen = 2;
+    
+    } else if ((c & SHASM_BLOCK_UTF8_4MASK) == SHASM_BLOCK_UTF8_3MASK) {
+      /* 3-byte sequence */
+      clen = 3;
+      
+    } else if ((c & SHASM_BLOCK_UTF8_XMASK) == SHASM_BLOCK_UTF8_4MASK) {
+      /* 4-byte sequence */
+      clen = 4;
+      
+    } else {
+      /* Illegal leading byte */
+      status = 0;
+      result = SHASM_INPUT_INVALID;
+    }
+    
+    /* The decoded value starts out with the bits of the leading byte,
+     * with the mask bits toggled off */
+    if (status) {
+      if (clen == 2) {
+        /* Mask off the 2-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_2MASK;
+      
+      } else if (clen == 3) {
+        /* Mask off the 3-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_3MASK;
+        
+      } else if (clen == 4) {
+        /* Mask off the 4-byte sequence marker */
+        result = c ^ SHASM_BLOCK_UTF8_4MASK;
+      
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+    }
+    
+    /* Now add the bits in each of the trailing bytes */
+    if (status) {
+      for(x = 1; x < clen; x++) {
+        /* Read a trailing byte */
+        c = shasm_input_get(ps);
+        if (c == SHASM_INPUT_EOF) {
+          status = 0;
+          result = SHASM_INPUT_EOF;
+        } else if (c == SHASM_INPUT_IOERR) {
+          status = 0;
+          result = SHASM_INPUT_IOERR;
+        }
+        
+        /* Make sure the byte is marked as a trailing byte */
+        if (status && ((c & SHASM_BLOCK_UTF8_2MASK) != 0x80)) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+        /* Undo the trailing byte mask and add the six bits to the
+         * decoded value */
+        if (status) {
+          c ^= 0x80;
+          result = (result << 6) | c;
+        }
+        
+        /* Break if there was any error */
+        if (!status) {
+          break;
+        }
+      }
+    }
+    
+    /* Finally, check for and fail on overlong encodings */
+    if (status) {
+      if (clen == 2) {
+        /* Verify 2-byte range */
+        if (result < SHASM_BLOCK_UTF8_2BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else if (clen == 3) {
+        /* Verify 3-byte range */
+        if (result < SHASM_BLOCK_UTF8_3BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else if (clen == 4) {
+        /* Verify 4-byte range */
+        if (result < SHASM_BLOCK_UTF8_4BYTE) {
+          status = 0;
+          result = SHASM_INPUT_INVALID;
+        }
+        
+      } else {
+        /* Shouldn't happen */
+        abort();
+      }
+    }
+  
+  } else if (status) {
+    /* Byte has its most significant bit clear, so unread the byte and
+     * return zero to indicate no extended UTF-8 codepoint present */
+    shasm_input_back(ps);
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
