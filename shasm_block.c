@@ -355,6 +355,38 @@ typedef struct {
   
 } SHASM_BLOCK_SPECBUF;
 
+/*
+ * Structure for storing information related to the surrogate buffer.
+ * 
+ * Use the shasm_block_surbuf functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The buffered surrogate, or zero if there is no buffered surrogate,
+   * or -1 if the surrogate buffer is in an error condition.
+   * 
+   * This field starts out zero, to indicate that no surrogate is
+   * buffered and there is no error.
+   * 
+   * If a low surrogate is encountered when this field has a high
+   * surrogate, then surrogates are paired to select a supplemental
+   * codepoint and this buffer is then cleared.  Encountering a low
+   * surrogate when this buffer is empty causes the buffer to go into
+   * error state since the surrogate is unpaired.
+   * 
+   * If a high surrogate is encountered when this field is empty, then
+   * it is stored in the buffer.  If a high surrogate is encountered
+   * when this field already has a high surrogate in it, then the buffer
+   * changes to error state on account of improperly paired surrogates.
+   * 
+   * At the end of input, if this buffer has a high surrogate within it,
+   * it changes to error state on account of an unpaired surrogate.
+   */
+  long buf;
+  
+} SHASM_BLOCK_SURBUF;
+
 /* 
  * Local functions
  * ===============
@@ -459,6 +491,12 @@ static long shasm_block_nomap(
     long entity,
     unsigned char *pBuf,
     long buf_len);
+
+static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb);
+static long shasm_block_surbuf_process(
+    SHASM_BLOCK_SURBUF *psb,
+    long v);
+static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb);
 
 /*
  * Set a block reader into an error state.
@@ -2474,6 +2512,95 @@ static long shasm_block_nomap(
   
   /* Return zero */
   return 0;
+}
+
+/*
+ * Initialize a surrogate buffer.
+ * 
+ * This function may also be used to reset a surrogate buffer back to
+ * its initial state.  Surrogate buffers do not need to be deinitialized
+ * or cleaned up in any way before releasing.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer
+ */
+static void shasm_block_surbuf_init(SHASM_BLOCK_SURBUF *psb) {
+  /* @@TODO: */
+}
+
+/*
+ * Process a Unicode codepoint through a surrogate buffer.
+ * 
+ * The provided codepoint v must be in range zero up to and including
+ * SHASM_BLOCK_MAXCODE.
+ * 
+ * If the surrogate buffer is already in an error state when this
+ * function is called, this function will return -1 indicating an error.
+ * 
+ * Otherwise, processing depends on whether the surrogate buffer has a
+ * high surrogate buffered or whether it is empty.
+ * 
+ * If the surrogate buffer is empty, then the function will return a
+ * non-surrogate codepoint as-is.  A high surrogate will be buffered and
+ * -2 will be returned indicating that no codepoint should be sent
+ * further yet.  A low surrogate will cause the surrogate buffer to
+ * change to error state and -1 will be returned, indicating an
+ * improperly paired surrogate.
+ * 
+ * If the surrogate buffer has a high surrogate buffered, then the
+ * function will combine a low surrogate with the high surrogate to
+ * form a supplemental codepoint, return the supplemental codepoint, and
+ * clear the buffer.  If the surrogate buffer encounters a high
+ * surrogate or a non-surrogate when a high surrogate is buffered, the
+ * surrogate buffer will transition to error state and -1 will be
+ * returned, indicating an improperly paired surrogate.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer
+ * 
+ *   v - the codepoint to process
+ * 
+ * Return:
+ * 
+ *   a fully processed codepoint, or -1 indicating an improperly paired
+ *   surrogate, or -2 indicating that there is no fully processed
+ *   codepoint to report
+ */
+static long shasm_block_surbuf_process(
+    SHASM_BLOCK_SURBUF *psb,
+    long v) {
+  /* @@TODO: */
+}
+
+/*
+ * Verify that the surrogate buffer is in an appropriate final state.
+ * 
+ * If the surrogate buffer is in an error state, then this function
+ * returns zero indicating the surrogate buffer is not in an acceptable
+ * final state.
+ * 
+ * Otherwise, if the surrogate buffer is empty, then this function
+ * returns non-zero indicating the surrogate buffer is in an acceptable
+ * final state.  If the surrogate buffer has a high surrogate buffered,
+ * the buffer transitions to an error state and zero is returned,
+ * indicating an improperly paired surrogate.
+ * 
+ * After a successful return, the surrogate buffer will be in its
+ * initial state, and it can be reused again.
+ * 
+ * Parameters:
+ * 
+ *   psb - the surrogate buffer to check
+ * 
+ * Return:
+ * 
+ *   non-zero if surrogate buffer is in an acceptable final state, zero
+ *   if not
+ */
+static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb) {
+  /* @@TODO: */
 }
 
 /*
