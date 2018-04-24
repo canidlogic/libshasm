@@ -479,7 +479,7 @@ static long shasm_block_decode_numeric(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps,
     int stype,
-    SHASM_BLOCK_ESCLIST *pel,
+    const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus);
 
 static int shasm_block_decode_entities(
@@ -2380,7 +2380,7 @@ static long shasm_block_decode_numeric(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps,
     int stype,
-    SHASM_BLOCK_ESCLIST *pel,
+    const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus) {
   /* @@TODO: */
   return -1;
@@ -2408,12 +2408,21 @@ static long shasm_block_decode_numeric(
  * they do not need to be continually allocated.  The caller should
  * initialize each of these before the first call to this function, then
  * just keep passing them into the function, and reset them
- * appropriately and release them once done.
+ * appropriately and release them once done.  This function assumes they
+ * have been initialized correctly and they are not tampered with
+ * between calls.
  * 
  * If the provided block reader is in an error state upon entry to this
  * function, this function fails immediately.  Otherwise, if this
  * function fails, it will set an appropriate error status in the
  * provided block reader.
+ * 
+ * The provided string parameters must not have any NULL function
+ * pointers within them, or this function will fault.  This is as
+ * opposed to the public interface of the regular string reader, which
+ * allows NULL function pointers for certain fields.  This function
+ * assumes the string parameters structure has already been checked by
+ * the caller.
  * 
  * Parameters:
  * 
@@ -2440,8 +2449,61 @@ static int shasm_block_decode_entities(
     SHASM_BLOCK_TBUF *pt,
     SHASM_IFLSTATE *ps,
     const SHASM_BLOCK_STRING *sp) {
-  /* @@TODO: */
-  return 1;
+  
+  int status = 1;
+  int errnum = SHASM_OKAY;
+  long v = 0;
+  
+  /* Check parameters */
+  if ((pb == NULL) || (pdo == NULL) || (psb == NULL) || (pt == NULL) ||
+      (ps == NULL) || (sp == NULL)) {
+    abort();
+  }
+  
+  /* Fail immediately if block reader in error status */
+  if (pb->code != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Keep reading entity codes and sending them to the encoder until
+   * no more entities to read or there's an error */
+  while (status) {
+    
+    /* Read an entity code */
+    v = shasm_block_decode_numeric(
+          pdo,
+          psb,
+          ps,
+          sp->stype,
+          &(sp->elist),
+          &errnum);
+    if ((v == -1) && (errnum != SHASM_OKAY)) {
+      status = 0;
+      shasm_block_seterr(pb, ps, errnum);
+    }
+    
+    /* If successful but no entity read, break out of loop */
+    if (status && (v == -1)) {
+      break;
+    }
+    
+    /* Entity read, so encode it */
+    if (status) {
+      if (!shasm_block_encode(
+            pb,
+            v,
+            &(sp->enc),
+            sp->o_over,
+            sp->o_strict,
+            pt)) {
+        status = 0;
+        shasm_block_seterr(pb, ps, SHASM_ERR_HUGEBLOCK);
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
