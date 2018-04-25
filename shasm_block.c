@@ -1294,8 +1294,14 @@ static void shasm_block_circbuf_advance(
  *   the current number of bytes in the buffer
  */
 static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
-  /* @@TODO: */
-  return 0;
+  
+  /* Check parameter */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Return the length */
+  return pcb->length;
 }
 
 /*
@@ -1319,8 +1325,37 @@ static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
  *   i - the offset of the element to request
  */
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
-  /* @@TODO: */
-  return 0;
+  
+  long first = 0;
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (i < 0)) {
+    abort();
+  }
+  
+  /* Check that i is in range relative to the current length */
+  if (i >= pcb->length) {
+    abort();
+  }
+  
+  /* Figure out the index of the first element of the queue, taking into
+   * account possible wraparound */
+  if (pcb->next >= pcb->length) {
+    first = pcb->next - pcb->length;
+  } else {
+    first = (pcb->next - pcb->length) + pcb->bufcap;
+  }
+  
+  /* Adjust i as an offset from the first element */
+  i += first;
+  
+  /* If i exceeds the capacity of the buffer, wrap it around */
+  if (i >= pcb->bufcap) {
+    i -= pcb->bufcap;
+  }
+  
+  /* Return the desired element */
+  return pcb->pBuf[i];
 }
 
 /*
