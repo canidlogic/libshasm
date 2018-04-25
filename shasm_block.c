@@ -108,6 +108,10 @@
 
 /*
  * The initial and maximum capacities of the circular buffer, in bytes.
+ * 
+ * INITCAP must be greater than zero and less than or equal to MAXCAP.
+ * MAXCAP must be such that it can be multiplied by two without overflow
+ * in signed long range.
  */
 #define SHASM_BLOCK_CIRCBUF_INITCAP (8L)
 #define SHASM_BLOCK_CIRCBUF_MAXCAP  (32767L)
@@ -1153,8 +1157,91 @@ static void shasm_block_circbuf_reset(
  *   non-zero if successful, zero if no more capacity to append the byte
  */
 static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  long newcap = 0;
+  long initial = 0;
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Fail if the buffer is already filled to maximum capacity */
+  if (pcb->length >= SHASM_BLOCK_CIRCBUF_MAXCAP) {
+    status = 0;
+  }
+  
+  /* If buffer is not allocated yet, allocate it at initial capacity */
+  if (status && (pcb->bufcap == 0)) {
+    pcb->bufcap = SHASM_BLOCK_CIRCBUF_INITCAP;
+    pcb->pBuf = (unsigned char *) malloc(
+                  (size_t) SHASM_BLOCK_CIRCBUF_INITCAP);
+    if (pcb->pBuf == NULL) {
+      abort();
+    }
+    memset(pcb->pBuf, 0, (size_t) SHASM_BLOCK_CIRCBUF_INITCAP);
+  }
+  
+  /* If buffer currently filled to capacity, buffer needs to be grown */
+  if (status && (pcb->length >= pcb->bufcap)) {
+    /* New capacity should at first be double the current capacity --
+     * there won't be overflow because of the MAXCAP limit */
+    newcap = pcb->bufcap * 2;
+    
+    /* If new capacity exceeded maximum capacity, limit to maximum */
+    if (newcap > SHASM_BLOCK_CIRCBUF_MAXCAP) {
+      newcap = SHASM_BLOCK_CIRCBUF_MAXCAP;
+    }
+    
+    /* Reallocate the buffer at the new capacity */
+    pcb->pBuf = (unsigned char *) realloc(pcb->pBuf, (size_t) newcap);
+    if (pcb->pBuf == NULL) {
+      abort();
+    }
+    
+    /* Clear the new memory space to zero */
+    memset(
+        &(pcb->pBuf[pcb->bufcap]),
+        0,
+        (size_t) (newcap - pcb->bufcap));
+    
+    /* If the queue wraps around from the end of the buffer back to the
+     * start, then the opening segment must be moved to the new end of
+     * the buffer */
+    if (pcb->next < pcb->length) {
+      /* The number of initial elements in the queue before the
+       * wraparound is the number of units that length exceeds the next
+       * index */
+      initial = pcb->length - pcb->next;
+      
+      /* Copy the initial bytes to the end of the reallocated buffer,
+       * using memmove because the ranges might overlap */
+      memmove(
+          pcb->pBuf + (newcap - initial),
+          pcb->pBuf + (pcb->bufcap - initial),
+          (size_t) initial);
+    }
+    
+    /* Update the buffer capacity to the new capacity to finish the
+     * growth operation */
+    pcb->bufcap = newcap;
+  }
+  
+  /* Write the byte into the buffer and update the next and length
+   * fields, wrapping the next pointer back to the beginning of the
+   * buffer if it goes beyond the capacity */
+  if (status) {
+    pcb->pBuf[pcb->next] = (unsigned char) c;
+    (pcb->length)++;
+    (pcb->next)++;
+    if (pcb->next >= pcb->bufcap) {
+      pcb->next = 0;
+    }
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
