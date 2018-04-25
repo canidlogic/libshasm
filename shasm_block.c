@@ -108,6 +108,10 @@
 
 /*
  * The initial and maximum capacities of the circular buffer, in bytes.
+ * 
+ * INITCAP must be greater than zero and less than or equal to MAXCAP.
+ * MAXCAP must be such that it can be multiplied by two without overflow
+ * in signed long range.
  */
 #define SHASM_BLOCK_CIRCBUF_INITCAP (8L)
 #define SHASM_BLOCK_CIRCBUF_MAXCAP  (32767L)
@@ -1077,7 +1081,18 @@ static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
  *   pcb - the uninitialized circular buffer to initialize
  */
 static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pcb, 0, sizeof(SHASM_BLOCK_CIRCBUF));
+  pcb->pBuf = NULL;
+  pcb->bufcap = 0;
+  pcb->length = 0;
+  pcb->next = 0;
 }
 
 /*
@@ -1103,7 +1118,24 @@ static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb) {
 static void shasm_block_circbuf_reset(
     SHASM_BLOCK_CIRCBUF *pcb,
     int full) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Empty the buffer */
+  pcb->length = 0;
+  pcb->next = 0;
+  
+  /* If full reset, free the buffer if allocated */
+  if (full) {
+    if (pcb->bufcap > 0) {
+      free(pcb->pBuf);
+      pcb->pBuf = NULL;
+      pcb->bufcap = 0;
+    }
+  }
 }
 
 /*
@@ -1125,8 +1157,91 @@ static void shasm_block_circbuf_reset(
  *   non-zero if successful, zero if no more capacity to append the byte
  */
 static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  long newcap = 0;
+  long initial = 0;
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Fail if the buffer is already filled to maximum capacity */
+  if (pcb->length >= SHASM_BLOCK_CIRCBUF_MAXCAP) {
+    status = 0;
+  }
+  
+  /* If buffer is not allocated yet, allocate it at initial capacity */
+  if (status && (pcb->bufcap == 0)) {
+    pcb->bufcap = SHASM_BLOCK_CIRCBUF_INITCAP;
+    pcb->pBuf = (unsigned char *) malloc(
+                  (size_t) SHASM_BLOCK_CIRCBUF_INITCAP);
+    if (pcb->pBuf == NULL) {
+      abort();
+    }
+    memset(pcb->pBuf, 0, (size_t) SHASM_BLOCK_CIRCBUF_INITCAP);
+  }
+  
+  /* If buffer currently filled to capacity, buffer needs to be grown */
+  if (status && (pcb->length >= pcb->bufcap)) {
+    /* New capacity should at first be double the current capacity --
+     * there won't be overflow because of the MAXCAP limit */
+    newcap = pcb->bufcap * 2;
+    
+    /* If new capacity exceeded maximum capacity, limit to maximum */
+    if (newcap > SHASM_BLOCK_CIRCBUF_MAXCAP) {
+      newcap = SHASM_BLOCK_CIRCBUF_MAXCAP;
+    }
+    
+    /* Reallocate the buffer at the new capacity */
+    pcb->pBuf = (unsigned char *) realloc(pcb->pBuf, (size_t) newcap);
+    if (pcb->pBuf == NULL) {
+      abort();
+    }
+    
+    /* Clear the new memory space to zero */
+    memset(
+        &(pcb->pBuf[pcb->bufcap]),
+        0,
+        (size_t) (newcap - pcb->bufcap));
+    
+    /* If the queue wraps around from the end of the buffer back to the
+     * start, then the opening segment must be moved to the new end of
+     * the buffer */
+    if (pcb->next < pcb->length) {
+      /* The number of initial elements in the queue before the
+       * wraparound is the number of units that length exceeds the next
+       * index */
+      initial = pcb->length - pcb->next;
+      
+      /* Copy the initial bytes to the end of the reallocated buffer,
+       * using memmove because the ranges might overlap */
+      memmove(
+          pcb->pBuf + (newcap - initial),
+          pcb->pBuf + (pcb->bufcap - initial),
+          (size_t) initial);
+    }
+    
+    /* Update the buffer capacity to the new capacity to finish the
+     * growth operation */
+    pcb->bufcap = newcap;
+  }
+  
+  /* Write the byte into the buffer and update the next and length
+   * fields, wrapping the next pointer back to the beginning of the
+   * buffer if it goes beyond the capacity */
+  if (status) {
+    pcb->pBuf[pcb->next] = (unsigned char) c;
+    (pcb->length)++;
+    (pcb->next)++;
+    if (pcb->next >= pcb->bufcap) {
+      pcb->next = 0;
+    }
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -1149,7 +1264,19 @@ static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c) {
 static void shasm_block_circbuf_advance(
     SHASM_BLOCK_CIRCBUF *pcb,
     long d) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (d < 0)) {
+    abort();
+  }
+  
+  /* Check that d does not exceed the length of the queue */
+  if (pcb->length < d) {
+    abort();
+  }
+  
+  /* Advance the buffer */
+  pcb->length -= d;
 }
 
 /*
@@ -1167,8 +1294,14 @@ static void shasm_block_circbuf_advance(
  *   the current number of bytes in the buffer
  */
 static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
-  /* @@TODO: */
-  return 0;
+  
+  /* Check parameter */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Return the length */
+  return pcb->length;
 }
 
 /*
@@ -1192,8 +1325,37 @@ static long shasm_block_circbuf_length(SHASM_BLOCK_CIRCBUF *pcb) {
  *   i - the offset of the element to request
  */
 static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
-  /* @@TODO: */
-  return 0;
+  
+  long first = 0;
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (i < 0)) {
+    abort();
+  }
+  
+  /* Check that i is in range relative to the current length */
+  if (i >= pcb->length) {
+    abort();
+  }
+  
+  /* Figure out the index of the first element of the queue, taking into
+   * account possible wraparound */
+  if (pcb->next >= pcb->length) {
+    first = pcb->next - pcb->length;
+  } else {
+    first = (pcb->next - pcb->length) + pcb->bufcap;
+  }
+  
+  /* Adjust i as an offset from the first element */
+  i += first;
+  
+  /* If i exceeds the capacity of the buffer, wrap it around */
+  if (i >= pcb->bufcap) {
+    i -= pcb->bufcap;
+  }
+  
+  /* Return the desired element */
+  return pcb->pBuf[i];
 }
 
 /*
