@@ -1077,7 +1077,18 @@ static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
  *   pcb - the uninitialized circular buffer to initialize
  */
 static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pcb, 0, sizeof(SHASM_BLOCK_CIRCBUF));
+  pcb->pBuf = NULL;
+  pcb->bufcap = 0;
+  pcb->length = 0;
+  pcb->next = 0;
 }
 
 /*
@@ -1103,7 +1114,24 @@ static void shasm_block_circbuf_init(SHASM_BLOCK_CIRCBUF *pcb) {
 static void shasm_block_circbuf_reset(
     SHASM_BLOCK_CIRCBUF *pcb,
     int full) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if (pcb == NULL) {
+    abort();
+  }
+  
+  /* Empty the buffer */
+  pcb->length = 0;
+  pcb->next = 0;
+  
+  /* If full reset, free the buffer if allocated */
+  if (full) {
+    if (pcb->bufcap > 0) {
+      free(pcb->pBuf);
+      pcb->pBuf = NULL;
+      pcb->bufcap = 0;
+    }
+  }
 }
 
 /*
