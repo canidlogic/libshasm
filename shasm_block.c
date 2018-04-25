@@ -1264,7 +1264,19 @@ static int shasm_block_circbuf_append(SHASM_BLOCK_CIRCBUF *pcb, int c) {
 static void shasm_block_circbuf_advance(
     SHASM_BLOCK_CIRCBUF *pcb,
     long d) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if ((pcb == NULL) || (d < 0)) {
+    abort();
+  }
+  
+  /* Check that d does not exceed the length of the queue */
+  if (pcb->length < d) {
+    abort();
+  }
+  
+  /* Advance the buffer */
+  pcb->length -= d;
 }
 
 /*
