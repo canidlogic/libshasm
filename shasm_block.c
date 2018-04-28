@@ -1461,8 +1461,42 @@ static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
 static int shasm_block_specbuf_detach(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  long cs = 0;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL)) {
+    abort();
+  }
+  
+  /* Fail if the speculation buffer is marked */
+  if (psb->marked) {
+    status = 0;
+  }
+  
+  /* Determine the number of bytes in the speculation buffer */
+  if (status) {
+    cs = shasm_block_circbuf_length(&(psb->cb));
+  }
+  
+  /* Fail if more than one byte buffered */
+  if (status && (cs > 1)) {
+    status = 0;
+  }
+  
+  /* If a byte is buffered, backtrack on input filter stack, perform a
+   * partial reset on the circular buffer, and reset statistics on the
+   * speculation buffer */
+  if (status && (cs == 1)) {
+    shasm_input_back(ps);
+    shasm_block_circbuf_reset(&(psb->cb), 0);
+    psb->back_count = 0;
+    psb->marked = 0;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
