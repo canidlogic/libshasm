@@ -1694,7 +1694,20 @@ static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fault if not marked or back buffer is empty */
+  if ((!psb->marked) || (psb->back_count < 1)) {
+    abort();
+  }
+  
+  /* Transfer a byte from the end of the back buffer to the start of the
+   * front buffer */
+  (psb->back_count)--;
 }
 
 /*
