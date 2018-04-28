@@ -178,7 +178,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Add input override support to outer function
 - [x] Write outermost inner function
 - [x] Implement circular queue
-- [ ] Implement speculation buffer
+- [x] Implement speculation buffer
 - [ ] Write numeric escape inner function
 - [ ] Implement decoding overlay
 - [ ] Write innermost decoding function
