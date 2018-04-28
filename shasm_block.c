@@ -1543,8 +1543,76 @@ static int shasm_block_specbuf_detach(
 static int shasm_block_specbuf_get(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps) {
-  /* @@TODO: */
-  return SHASM_INPUT_IOERR;
+  
+  long cl = 0;
+  long fbl = 0;
+  int result = 0;
+  int status = 1;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL)) {
+    abort();
+  }
+  
+  /* Get the number of bytes in the circular queue and compute the front
+   * buffer length */
+  cl = shasm_block_circbuf_length(&(psb->cb));
+  if (psb->marked) {
+    fbl = cl - psb->back_count;
+  } else {
+    fbl = cl;
+  }
+  
+  /* Handle each case */
+  if ((!psb->marked) && (cl == 0)) {
+    /* Buffer unmarked and empty, so pass through byte from input filter
+     * stack */
+    result = shasm_input_get(ps);
+    
+  } else if ((!psb->marked) && (cl != 0)) {
+    /* Buffer unmarked but not empty, so remove first byte from buffer
+     * and return that */
+    result = shasm_block_circbuf_get(&(psb->cb), 0);
+    shasm_block_circbuf_advance(&(psb->cb), 1);
+    
+  } else if (psb->marked && (fbl == 0)) {
+    /* Buffer marked and front buffer empty -- begin by reading a byte
+     * from the input filter stack */
+    result = shasm_input_get(ps);
+    if ((result == SHASM_INPUT_EOF) || (result == SHASM_INPUT_IOERR)) {
+      status = 0;
+    }
+    
+    /* Append the byte that was read to the circular buffer */
+    if (status) {
+      if (!shasm_block_circbuf_append(&(psb->cb), result)) {
+        /* No more capacity */
+        result = SHASM_INPUT_INVALID;
+        status = 0;
+      }
+    }
+    
+    /* Adjust the back buffer count so that the byte that was just
+     * appended to the buffer ends up at the end of the back buffer */
+    if (status) {
+      (psb->back_count)++;
+    }
+  
+  } else if (psb->marked && (fbl != 0)) {
+    /* Buffer marked and front buffer not empty, so return byte value at
+     * start of front buffer and transfer this byte from the start of
+     * the front buffer to the end of the back buffer by adjusting the
+     * back buffer count */
+    result = shasm_block_circbuf_get(&(psb->cb), psb->back_count);
+    (psb->back_count)++;
+    
+  } else {
+    /* Shouldn't happen */
+    abort();
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
