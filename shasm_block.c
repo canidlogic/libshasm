@@ -1626,7 +1626,21 @@ static int shasm_block_specbuf_get(
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* If buffer currently marked and back buffer not empty, discard any
+   * bytes in the back buffer */
+  if (psb->marked && (psb->back_count > 0)) {
+    shasm_block_circbuf_advance(&(psb->cb), psb->back_count);
+    psb->back_count = 0;
+  }
+  
+  /* Mark the buffer if not already marked */
+  psb->marked = 1;
 }
 
 /*
