@@ -1376,7 +1376,17 @@ static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
  *   psb - the uninitialized speculation buffer to initialize
  */
 static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(psb, 0, sizeof(SHASM_BLOCK_SPECBUF));
+  shasm_block_circbuf_init(&(psb->cb));
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
@@ -1398,7 +1408,16 @@ static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer to reset
  */
 static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Reset */
+  shasm_block_circbuf_reset(&(psb->cb), 1);
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
@@ -1442,8 +1461,42 @@ static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
 static int shasm_block_specbuf_detach(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  long cs = 0;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL)) {
+    abort();
+  }
+  
+  /* Fail if the speculation buffer is marked */
+  if (psb->marked) {
+    status = 0;
+  }
+  
+  /* Determine the number of bytes in the speculation buffer */
+  if (status) {
+    cs = shasm_block_circbuf_length(&(psb->cb));
+  }
+  
+  /* Fail if more than one byte buffered */
+  if (status && (cs > 1)) {
+    status = 0;
+  }
+  
+  /* If a byte is buffered, backtrack on input filter stack, perform a
+   * partial reset on the circular buffer, and reset statistics on the
+   * speculation buffer */
+  if (status && (cs == 1)) {
+    shasm_input_back(ps);
+    shasm_block_circbuf_reset(&(psb->cb), 0);
+    psb->back_count = 0;
+    psb->marked = 0;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -1490,8 +1543,76 @@ static int shasm_block_specbuf_detach(
 static int shasm_block_specbuf_get(
     SHASM_BLOCK_SPECBUF *psb,
     SHASM_IFLSTATE *ps) {
-  /* @@TODO: */
-  return SHASM_INPUT_IOERR;
+  
+  long cl = 0;
+  long fbl = 0;
+  int result = 0;
+  int status = 1;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL)) {
+    abort();
+  }
+  
+  /* Get the number of bytes in the circular queue and compute the front
+   * buffer length */
+  cl = shasm_block_circbuf_length(&(psb->cb));
+  if (psb->marked) {
+    fbl = cl - psb->back_count;
+  } else {
+    fbl = cl;
+  }
+  
+  /* Handle each case */
+  if ((!psb->marked) && (cl == 0)) {
+    /* Buffer unmarked and empty, so pass through byte from input filter
+     * stack */
+    result = shasm_input_get(ps);
+    
+  } else if ((!psb->marked) && (cl != 0)) {
+    /* Buffer unmarked but not empty, so remove first byte from buffer
+     * and return that */
+    result = shasm_block_circbuf_get(&(psb->cb), 0);
+    shasm_block_circbuf_advance(&(psb->cb), 1);
+    
+  } else if (psb->marked && (fbl == 0)) {
+    /* Buffer marked and front buffer empty -- begin by reading a byte
+     * from the input filter stack */
+    result = shasm_input_get(ps);
+    if ((result == SHASM_INPUT_EOF) || (result == SHASM_INPUT_IOERR)) {
+      status = 0;
+    }
+    
+    /* Append the byte that was read to the circular buffer */
+    if (status) {
+      if (!shasm_block_circbuf_append(&(psb->cb), result)) {
+        /* No more capacity */
+        result = SHASM_INPUT_INVALID;
+        status = 0;
+      }
+    }
+    
+    /* Adjust the back buffer count so that the byte that was just
+     * appended to the buffer ends up at the end of the back buffer */
+    if (status) {
+      (psb->back_count)++;
+    }
+  
+  } else if (psb->marked && (fbl != 0)) {
+    /* Buffer marked and front buffer not empty, so return byte value at
+     * start of front buffer and transfer this byte from the start of
+     * the front buffer to the end of the back buffer by adjusting the
+     * back buffer count */
+    result = shasm_block_circbuf_get(&(psb->cb), psb->back_count);
+    (psb->back_count)++;
+    
+  } else {
+    /* Shouldn't happen */
+    abort();
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -1505,7 +1626,21 @@ static int shasm_block_specbuf_get(
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* If buffer currently marked and back buffer not empty, discard any
+   * bytes in the back buffer */
+  if (psb->marked && (psb->back_count > 0)) {
+    shasm_block_circbuf_advance(&(psb->cb), psb->back_count);
+    psb->back_count = 0;
+  }
+  
+  /* Mark the buffer if not already marked */
+  psb->marked = 1;
 }
 
 /*
@@ -1523,7 +1658,21 @@ static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fault if buffer not currently marked */
+  if (!(psb->marked)) {
+    abort();
+  }
+  
+  /* Transfer the back buffer to the front of the front buffer and clear
+   * the mark flag */
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
@@ -1545,7 +1694,20 @@ static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fault if not marked or back buffer is empty */
+  if ((!psb->marked) || (psb->back_count < 1)) {
+    abort();
+  }
+  
+  /* Transfer a byte from the end of the back buffer to the start of the
+   * front buffer */
+  (psb->back_count)--;
 }
 
 /*
@@ -1560,7 +1722,15 @@ static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Mark the current position then restore to the current position */
+  shasm_block_specbuf_mark(psb);
+  shasm_block_specbuf_restore(psb);
 }
 
 /*
