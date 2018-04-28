@@ -1658,7 +1658,21 @@ static void shasm_block_specbuf_mark(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_restore(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Fault if buffer not currently marked */
+  if (!(psb->marked)) {
+    abort();
+  }
+  
+  /* Transfer the back buffer to the front of the front buffer and clear
+   * the mark flag */
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
