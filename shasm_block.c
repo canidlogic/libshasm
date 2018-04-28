@@ -1376,7 +1376,17 @@ static int shasm_block_circbuf_get(SHASM_BLOCK_CIRCBUF *pcb, long i) {
  *   psb - the uninitialized speculation buffer to initialize
  */
 static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(psb, 0, sizeof(SHASM_BLOCK_SPECBUF));
+  shasm_block_circbuf_init(&(psb->cb));
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
@@ -1398,7 +1408,16 @@ static void shasm_block_specbuf_init(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer to reset
  */
 static void shasm_block_specbuf_reset(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Reset */
+  shasm_block_circbuf_reset(&(psb->cb), 1);
+  psb->back_count = 0;
+  psb->marked = 0;
 }
 
 /*
