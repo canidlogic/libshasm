@@ -1722,7 +1722,15 @@ static void shasm_block_specbuf_backtrack(SHASM_BLOCK_SPECBUF *psb) {
  *   psb - the speculation buffer
  */
 static void shasm_block_specbuf_unmark(SHASM_BLOCK_SPECBUF *psb) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if (psb == NULL) {
+    abort();
+  }
+  
+  /* Mark the current position then restore to the current position */
+  shasm_block_specbuf_mark(psb);
+  shasm_block_specbuf_restore(psb);
 }
 
 /*
