@@ -1037,8 +1037,14 @@ static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
  *   no branches taken yet
  */
 static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Return most recent */
+  return pdo->recent;
 }
 
 /*
