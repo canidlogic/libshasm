@@ -179,7 +179,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Write outermost inner function
 - [x] Implement circular queue
 - [x] Implement speculation buffer
-- [ ] Implement decoding overlay
+- [x] Implement decoding overlay
 - [ ] Write innermost decoding function
 - [ ] Write numeric escape inner function
 
