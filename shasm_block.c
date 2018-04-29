@@ -885,6 +885,11 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
  * is accessed by anything besides this decoding map overlay while the
  * overlay is in use.
  * 
+ * This function assumes that the string parameters have already been
+ * verified and that NULL function pointers have been replaced with
+ * default handlers.  Undefined behavior results if this is not the 
+ * case.
+ * 
  * Parameters:
  * 
  *   pdo - the decoding map overlay to initialize
@@ -894,7 +899,22 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
 static void shasm_block_dover_init(
     SHASM_BLOCK_DOVER *pdo,
     const SHASM_BLOCK_STRING *sp) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if ((pdo == NULL) || (sp == NULL)) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pdo, 0, sizeof(SHASM_BLOCK_DOVER));
+  memcpy(&(pdo->dec), &(sp->dec), sizeof(SHASM_BLOCK_DECODER));
+  pdo->recent = -1;
+  pdo->stype = sp->stype;
+  pdo->i_over = sp->i_over;
+  pdo->nest_level = 1;
+  
+  /* Reset underlying decoding map */
+  (*((pdo->dec).fpReset))((pdo->dec).pCustom);
 }
 
 /*
@@ -939,8 +959,64 @@ static void shasm_block_dover_init(
  *   overflow
  */
 static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Handle particular nesting case */
+  if (nest == SHASM_BLOCK_DOVER_NEST_STAY) {
+    /* Stay at current nest level -- no operation */
+    (void) nest;
+    
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_INC) {
+    /* Increment nesting level -- make sure string type is {} */
+    if (pdo->stype != SHASM_BLOCK_STYPE_CURLY) {
+      abort();
+    }
+    
+    /* Increment, watching for overflow */
+    if (pdo->nest_level < (LONG_MAX - 1)) {
+      (pdo->nest_level)++;
+    } else {
+      status = 0;
+    }
+    
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_DEC) {
+    /* Decrement nesting level -- make sure string type is {} */
+    if (pdo->stype != SHASM_BLOCK_STYPE_CURLY) {
+      abort();
+    }
+    
+    /* Make sure nesting level is above one so decrementing doesn't
+     * cause the level to fall below one */
+    if (pdo->nest_level <= 1) {
+      abort();
+    }
+    
+    /* Decrement */
+    (pdo->nest_level)--;
+  
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_RESET) {
+    /* Reset nesting level back to one */
+    pdo->nest_level = 1;
+  
+  } else {
+    /* Unrecognized nesting command */
+    abort();
+  }
+  
+  /* Reset recent field and underlying decoding map */
+  if (status) {
+    (*((pdo->dec).fpReset))((pdo->dec).pCustom);
+    pdo->recent = -1;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -961,8 +1037,14 @@ static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
  *   no branches taken yet
  */
 static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Return most recent */
+  return pdo->recent;
 }
 
 /*
@@ -986,8 +1068,34 @@ static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
  *   non-zero if the current node is a stop node; zero if it is not
  */
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Check for stop node cases */
+  if ((pdo->stype == SHASM_BLOCK_STYPE_SQUOTE) &&
+        (pdo->recent == SHASM_ASCII_SQUOTE)) {
+    result = 1;
+  
+  } else if ((pdo->stype == SHASM_BLOCK_STYPE_DQUOTE) &&
+              (pdo->recent == SHASM_ASCII_DQUOTE)) {
+    result = 1;
+  
+  } else if ((pdo->stype == SHASM_BLOCK_STYPE_CURLY) &&
+              ((pdo->recent == SHASM_ASCII_LCURL) ||
+                (pdo->recent == SHASM_ASCII_RCURL))) {
+    result = 1;
+  
+  } else {
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -1035,8 +1143,62 @@ static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
  *   is unchanged
  */
 static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  
+  /* Check parameters */
+  if ((pdo == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Branch always fails if at a stop node */
+  if (shasm_block_dover_stopped(pdo)) {
+    status = 0;
+  }
+  
+  /* Special cases involving first branch from root position */
+  if (pdo->recent == -1) {
+    /* Fail if first branch is " for a "" string, or ' for a '' type
+     * string */
+    if ((pdo->stype == SHASM_BLOCK_STYPE_DQUOTE) &&
+          (c == SHASM_ASCII_DQUOTE)) {
+      status = 0;
+    
+    } else if ((pdo->stype == SHASM_BLOCK_STYPE_SQUOTE) &&
+                  (c == SHASM_ASCII_SQUOTE)) {
+      status = 0;
+    }
+  }
+  
+  /* Branch fails for } if it is the first branch, the nesting level is
+   * one, and the string type is {} */
+  if ((c == SHASM_ASCII_RCURL) && (pdo->recent == -1) &&
+        (pdo->nest_level == 1) &&
+        (pdo->stype == SHASM_BLOCK_STYPE_CURLY)) {
+    status = 0;
+  }
+  
+  /* Branch fails for bytes with most significant bit set if an input
+   * override is active */
+  if ((c >= 128) && (pdo->i_over != SHASM_BLOCK_IMODE_NONE)) {
+    status = 0;
+  }
+  
+  /* If one of the special cases above hasn't already failed the
+   * function, call through to the underlying decoding map */
+  if (status) {
+    if (!((*((pdo->dec).fpBranch))((pdo->dec).pCustom, c))) {
+      status = 0;
+    }
+  }
+  
+  /* If branch succeeded, update recent field */
+  if (status) {
+    pdo->recent = c;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -1059,8 +1221,24 @@ static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
  *   no associated entity code
  */
 static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  long result = 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* If no branches taken yet, force result to -1; else, call through to
+   * underlying decoding map's entity function */
+  if (pdo->recent == -1) {
+    result = -1;
+  } else {
+    result = (*((pdo->dec).fpEntity))((pdo->dec).pCustom);
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
