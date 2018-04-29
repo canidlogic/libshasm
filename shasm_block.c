@@ -1068,8 +1068,34 @@ static int shasm_block_dover_recent(SHASM_BLOCK_DOVER *pdo) {
  *   non-zero if the current node is a stop node; zero if it is not
  */
 static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Check for stop node cases */
+  if ((pdo->stype == SHASM_BLOCK_STYPE_SQUOTE) &&
+        (pdo->recent == SHASM_ASCII_SQUOTE)) {
+    result = 1;
+  
+  } else if ((pdo->stype == SHASM_BLOCK_STYPE_DQUOTE) &&
+              (pdo->recent == SHASM_ASCII_DQUOTE)) {
+    result = 1;
+  
+  } else if ((pdo->stype == SHASM_BLOCK_STYPE_CURLY) &&
+              ((pdo->recent == SHASM_ASCII_LCURL) ||
+                (pdo->recent == SHASM_ASCII_RCURL))) {
+    result = 1;
+  
+  } else {
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
