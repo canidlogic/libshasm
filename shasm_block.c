@@ -885,6 +885,11 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
  * is accessed by anything besides this decoding map overlay while the
  * overlay is in use.
  * 
+ * This function assumes that the string parameters have already been
+ * verified and that NULL function pointers have been replaced with
+ * default handlers.  Undefined behavior results if this is not the 
+ * case.
+ * 
  * Parameters:
  * 
  *   pdo - the decoding map overlay to initialize
@@ -894,7 +899,19 @@ static long shasm_block_tbuf_len(SHASM_BLOCK_TBUF *pt) {
 static void shasm_block_dover_init(
     SHASM_BLOCK_DOVER *pdo,
     const SHASM_BLOCK_STRING *sp) {
-  /* @@TODO: */
+  
+  /* Check parameters */
+  if ((pdo == NULL) || (sp == NULL)) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pdo, 0, sizeof(SHASM_BLOCK_DOVER));
+  memcpy(&(pdo->dec), &(sp->dec), sizeof(SHASM_BLOCK_DECODER));
+  pdo->recent = -1;
+  pdo->stype = sp->stype;
+  pdo->i_over = sp->i_over;
+  pdo->nest_level = 1;
 }
 
 /*
