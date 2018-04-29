@@ -914,7 +914,7 @@ static void shasm_block_dover_init(
   pdo->nest_level = 1;
   
   /* Reset underlying decoding map */
-  *((sp->dec).fpReset)((sp->dec).pCustom);
+  *((pdo->dec).fpReset)((pdo->dec).pCustom);
 }
 
 /*
@@ -959,8 +959,64 @@ static void shasm_block_dover_init(
  *   overflow
  */
 static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* Handle particular nesting case */
+  if (nest == SHASM_BLOCK_DOVER_NEST_STAY) {
+    /* Stay at current nest level -- no operation */
+    (void) nest;
+    
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_INC) {
+    /* Increment nesting level -- make sure string type is {} */
+    if (pdo->stype != SHASM_BLOCK_STYPE_CURLY) {
+      abort();
+    }
+    
+    /* Increment, watching for overflow */
+    if (pdo->nest_level < (LONG_MAX - 1)) {
+      (pdo->nest_level)++;
+    } else {
+      status = 0;
+    }
+    
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_DEC) {
+    /* Decrement nesting level -- make sure string type is {} */
+    if (pdo->stype != SHASM_BLOCK_STYPE_CURLY) {
+      abort();
+    }
+    
+    /* Make sure nesting level is above one so decrementing doesn't
+     * cause the level to fall below one */
+    if (pdo->nest_level <= 1) {
+      abort();
+    }
+    
+    /* Decrement */
+    (pdo->nest_level)--;
+  
+  } else if (nest == SHASM_BLOCK_DOVER_NEST_RESET) {
+    /* Reset nesting level back to one */
+    pdo->nest_level = 1;
+  
+  } else {
+    /* Unrecognized nesting command */
+    abort();
+  }
+  
+  /* Reset recent field and underlying decoding map */
+  if (status) {
+    *((pdo->dec).fpReset)((pdo->dec).pCustom);
+    pdo->recent = -1;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
