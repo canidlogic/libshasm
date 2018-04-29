@@ -1221,8 +1221,24 @@ static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
  *   no associated entity code
  */
 static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
-  /* @@TODO: */
-  return 0;
+  
+  long result = 0;
+  
+  /* Check parameter */
+  if (pdo == NULL) {
+    abort();
+  }
+  
+  /* If no branches taken yet, force result to -1; else, call through to
+   * underlying decoding map's entity function */
+  if (pdo->recent == -1) {
+    result = -1;
+  } else {
+    result = *((pdo->dec).fpEntity)((pdo->dec).pCustom);
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
