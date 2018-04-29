@@ -914,7 +914,7 @@ static void shasm_block_dover_init(
   pdo->nest_level = 1;
   
   /* Reset underlying decoding map */
-  *((pdo->dec).fpReset)((pdo->dec).pCustom);
+  (*((pdo->dec).fpReset))((pdo->dec).pCustom);
 }
 
 /*
@@ -1011,7 +1011,7 @@ static int shasm_block_dover_reset(SHASM_BLOCK_DOVER *pdo, int nest) {
   
   /* Reset recent field and underlying decoding map */
   if (status) {
-    *((pdo->dec).fpReset)((pdo->dec).pCustom);
+    (*((pdo->dec).fpReset))((pdo->dec).pCustom);
     pdo->recent = -1;
   }
   
@@ -1187,7 +1187,7 @@ static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
   /* If one of the special cases above hasn't already failed the
    * function, call through to the underlying decoding map */
   if (status) {
-    if (!(*((pdo->dec).fpBranch)((pdo->dec).pCustom, c))) {
+    if (!((*((pdo->dec).fpBranch))((pdo->dec).pCustom, c))) {
       status = 0;
     }
   }
@@ -1234,7 +1234,7 @@ static long shasm_block_dover_entity(SHASM_BLOCK_DOVER *pdo) {
   if (pdo->recent == -1) {
     result = -1;
   } else {
-    result = *((pdo->dec).fpEntity)((pdo->dec).pCustom);
+    result = (*((pdo->dec).fpEntity))((pdo->dec).pCustom);
   }
   
   /* Return result */
