@@ -912,6 +912,9 @@ static void shasm_block_dover_init(
   pdo->stype = sp->stype;
   pdo->i_over = sp->i_over;
   pdo->nest_level = 1;
+  
+  /* Reset underlying decoding map */
+  *((sp->dec).fpReset)((sp->dec).pCustom);
 }
 
 /*
