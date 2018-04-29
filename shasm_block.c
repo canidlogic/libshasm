@@ -1143,8 +1143,62 @@ static int shasm_block_dover_stopped(SHASM_BLOCK_DOVER *pdo) {
  *   is unchanged
  */
 static int shasm_block_dover_branch(SHASM_BLOCK_DOVER *pdo, int c) {
-  /* @@TODO: */
-  return 0;
+  
+  int status = 1;
+  
+  /* Check parameters */
+  if ((pdo == NULL) || (c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Branch always fails if at a stop node */
+  if (shasm_block_dover_stopped(pdo)) {
+    status = 0;
+  }
+  
+  /* Special cases involving first branch from root position */
+  if (pdo->recent == -1) {
+    /* Fail if first branch is " for a "" string, or ' for a '' type
+     * string */
+    if ((pdo->stype == SHASM_BLOCK_STYPE_DQUOTE) &&
+          (c == SHASM_ASCII_DQUOTE)) {
+      status = 0;
+    
+    } else if ((pdo->stype == SHASM_BLOCK_STYPE_SQUOTE) &&
+                  (c == SHASM_ASCII_SQUOTE)) {
+      status = 0;
+    }
+  }
+  
+  /* Branch fails for } if it is the first branch, the nesting level is
+   * one, and the string type is {} */
+  if ((c == SHASM_ASCII_RCURL) && (pdo->recent == -1) &&
+        (pdo->nest_level == 1) &&
+        (pdo->stype == SHASM_BLOCK_STYPE_CURLY)) {
+    status = 0;
+  }
+  
+  /* Branch fails for bytes with most significant bit set if an input
+   * override is active */
+  if ((c >= 128) && (pdo->i_over != SHASM_BLOCK_IMODE_NONE)) {
+    status = 0;
+  }
+  
+  /* If one of the special cases above hasn't already failed the
+   * function, call through to the underlying decoding map */
+  if (status) {
+    if (!(*((pdo->dec).fpBranch)((pdo->dec).pCustom, c))) {
+      status = 0;
+    }
+  }
+  
+  /* If branch succeeded, update recent field */
+  if (status) {
+    pdo->recent = c;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
