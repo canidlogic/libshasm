@@ -22,9 +22,15 @@
 #define SHASM_ASCII_LPAREN    (0x28)  /* ( */
 #define SHASM_ASCII_RPAREN    (0x29)  /* ) */
 #define SHASM_ASCII_COMMA     (0x2c)  /* , */
+#define SHASM_ASCII_ZERO      (0x30)  /* 0 */
+#define SHASM_ASCII_NINE      (0x39)  /* 9 */
 #define SHASM_ASCII_SEMICOLON (0x3b)  /* ; */
+#define SHASM_ASCII_UPPER_A   (0x41)  /* A */
+#define SHASM_ASCII_UPPER_F   (0x46)  /* F */
 #define SHASM_ASCII_LSQR      (0x5b)  /* [ */
 #define SHASM_ASCII_RSQR      (0x5d)  /* ] */
+#define SHASM_ASCII_LOWER_A   (0x61)  /* a */
+#define SHASM_ASCII_LOWER_F   (0x66)  /* f */
 #define SHASM_ASCII_LCURL     (0x7b)  /* { */
 #define SHASM_ASCII_BAR       (0x7c)  /* | */
 #define SHASM_ASCII_RCURL     (0x7d)  /* } */

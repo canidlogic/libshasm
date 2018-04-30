@@ -513,6 +513,15 @@ static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb);
 
 static long shasm_block_read_utf8(SHASM_IFLSTATE *ps);
 
+static int shasm_block_base16(int c);
+static long shasm_block_read_numeric(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int base16,
+    int min_len,
+    int max_len,
+    int *pStatus);
+
 /*
  * Set a block reader into an error state.
  * 
@@ -3618,6 +3627,113 @@ static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
   
   /* Return result */
   return result;
+}
+
+/*
+ * Translate an ASCII character code into a base-16 digit.
+ * 
+ * The provided character code must be in range 0-255 or a fault occurs.
+ * 
+ * Character codes in range of ASCII decimal digits 0-9 are translated
+ * to digit values 0-9.
+ * 
+ * Character codes in range of ASCII uppercase A-F are translated to
+ * digit values 10-15.
+ * 
+ * Character codes in range of ASCII lowercase a-f are translated to
+ * digit values 10-15.
+ * 
+ * All other character codes return -1 to indicate that the provided
+ * character code doesn't map to a base-16 digit.
+ * 
+ * Parameters:
+ * 
+ *   c - the character code to translate
+ * 
+ * Return:
+ * 
+ *   the translated numeric digit value, or -1 if the character code
+ *   does not map to a base-16 digit
+ */
+static int shasm_block_base16(int c) {
+  /* @@TODO: */
+  abort();
+}
+
+/*
+ * Read a base-10 or base-16 integer encoded in ASCII.
+ * 
+ * The characters are read through the provided speculation buffer using
+ * the provided input filter stack.  The speculation buffer can be in
+ * any marked state upon entry, but upon exit it will always be
+ * unmarked.
+ * 
+ * If base16 is non-zero, then the integer is encoded in base-16, with
+ * ASCII 0-9, A-F, and a-f recognized as digits.  If base-16 is zero,
+ * then the integer is encoded in base-10, with ASCII 0-9 recognized as
+ * digits.  No sign is allowed to precede the digits, so this function
+ * can only read positive values.
+ * 
+ * min_len is the minimum number of digits that must be read.  This
+ * value must be one or greater.
+ * 
+ * max_len is the maximum number of digits that may be read.  This value
+ * must either be -1 (indicating there is no maximum), or it must be
+ * greater than or equal to min_len.
+ * 
+ * pStatus must not be NULL.  It points to the error status.  If the
+ * error status is not SHASM_OKAY upon entry to this function, this
+ * function fails immediately without performing any action.
+ * 
+ * This function begins by marking the speculation buffer with the
+ * initial position.  Then, it reads one or more base-10 or base-16
+ * digits until one of the following happens:
+ * 
+ * (1) max_len is not -1 and a total of max_len digits have been read.
+ * The function ends successfully in this case, returning the numeric
+ * value that has been parsed and clearing any marks in the speculation
+ * buffer.
+ * 
+ * (2) A non-digit character is read.  If at least min_len digits have
+ * already been read, the speculation buffer is backtracked by one, the
+ * buffer is then unmarked, and the function successfully returns the
+ * numeric value that has been parsed.  If less than min_len digits have
+ * been read, the function fails with SHASM_ERR_BADNUMESC.
+ * 
+ * (3) The numeric value being parsed exceeds LONG_MAX.  In this case,
+ * the function fails with SHASM_ERR_NUMESCRANGE.
+ * 
+ * (4) SHASM_INPUT_EOF, SHASM_INPUT_IOERR, or SHASM_INPUT_INVALID are
+ * read from the speculation buffer.  The function fails with 
+ * SHASM_ERR_EOF, SHASM_ERR_IO, or SHASM_ERR_OVERSPEC, respectively.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ *   base16 - non-zero for base-16 mode, zero for base-10 mode
+ * 
+ *   min_len - the minimum number of digits to read
+ * 
+ *   max_len - the maximum number of digits to read, or -1 if no maximum
+ * 
+ *   pStatus - pointer to the error status
+ * 
+ * Return:
+ * 
+ *   the numeric value that was read, or -1 if there was an error
+ */
+static long shasm_block_read_numeric(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int base16,
+    int min_len,
+    int max_len,
+    int *pStatus) {
+  /* @@TODO: */
+  abort();
 }
 
 /*
