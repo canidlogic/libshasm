@@ -180,7 +180,7 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Implement circular queue
 - [x] Implement speculation buffer
 - [x] Implement decoding overlay
-- [ ] Write innermost decoding function
+- [x] Write innermost decoding function
 - [ ] Write numeric escape inner function
 
 The basic approach is to write the interfaces first (first five steps), add placeholders (next step), and then finish the functions starting with the outermost decoding function and working inward, but implement the numeric escape wrapper after the innermost function.  At first, only empty strings (terminal key immediately) are supported.  Then, strings with only extended UTF-8 characters in input override mode are supported.  Then, everything except numeric escapes.  Finally, full decoding support.
