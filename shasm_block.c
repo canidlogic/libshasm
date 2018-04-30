@@ -3039,6 +3039,11 @@ static long shasm_block_decode_inner(
  * mismatches the registered terminal byte value, fail with the error
  * SHASM_ERR_BADNUMESC.  Otherwise, return the numeric escape.
  * 
+ * The provided escape list structure must not have NULL function
+ * pointers of a fault will occur.  It is assumed that the caller has
+ * provided default functions if the original client used NULL function
+ * pointer values.
+ * 
  * Parameters:
  * 
  *   pdo - the decoding map overlay
@@ -3067,8 +3072,128 @@ static long shasm_block_decode_numeric(
     int stype,
     const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus) {
-  /* @@TODO: */
-  return shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
+  
+  long result = 0;
+  int status = 1;
+  int escaped = 0;
+  int c = 0;
+  SHASM_BLOCK_NUMESCAPE nes;
+  
+  /* Initialize structure */
+  memset(&nes, 0, sizeof(SHASM_BLOCK_NUMESCAPE));
+  
+  /* Check pel parameter (rest of parameters will be checked when passed
+   * through) */
+  if (pel == NULL) {
+    abort();
+  }
+  if (pel->fpEscQuery == NULL) {
+    abort();
+  }
+  
+  /* Call through to the inner decoding function */
+  result = shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
+  
+  /* If inner decoding function returned an entity, query the escape
+   * list to see if this matches a numeric escape entity code, setting
+   * the escaped flag and reading the parameters into nes if so */
+  if (result >= 0) {
+    /* Query for a numeric escape */
+    if ((*(pel->fpEscQuery))(pel->pCustom, result, &nes)) {
+      escaped = 1;
+    }
+    
+    /* Check max_entity and terminal fields if escaped flag is set --
+     * other fields will either be checked by shasm_block_read_numeric
+     * or they are flags */
+    if (escaped) {
+      /* Check max_entity */
+      if (nes.max_entity < 0) {
+        abort();
+      }
+      
+      /* Check terminal (if it is not the special -1 value) */
+      if (nes.terminal != -1) {
+        /* Make sure terminal is in range 0-255 (if not -1) */
+        if ((nes.terminal < 0) || (nes.terminal > 255)) {
+          abort();
+        }
+        
+        /* Make sure terminal is not a digit */
+        c = shasm_block_base16(nes.terminal);
+        if (!nes.base16) {
+          if (c > 9) {
+            c == -1;
+          }
+        }
+        if (c != -1) {
+          /* Terminal is a digit in the selected number base */
+          abort();
+        }
+      }
+    }
+  }
+  
+  /* Handle numeric escape if we just read a numeric escape entity */
+  if (escaped) {
+    /* First of all, read the numeric value */
+    result = shasm_block_read_numeric(
+                psb,
+                ps,
+                nes.base16,
+                nes.min_len,
+                nes.max_len,
+                pStatus);
+    if (result == -1) {
+      status = 0;
+    }
+    
+    /* Fail if out of maximum entity range */
+    if (status && (result > nes.max_entity)) {
+      *pStatus = SHASM_ERR_NUMESCRANGE;
+      status = 0;
+    }
+    
+    /* Fail if in surrogate range and block surrogates mode on */
+    if (status && nes.block_surrogates &&
+          (result >= SHASM_BLOCK_MINSURROGATE) &&
+          (result <= SHASM_BLOCK_MAXSURROGATE)) {
+      *pStatus = SHASM_ERR_NUMESCSUR;
+      status = 0;
+    }
+    
+    /* If there's a terminal, read it */
+    if (status && (nes.terminal != -1)) {
+      /* Read a character */
+      c = shasm_block_specbuf_get(psb, ps);
+      if (c == SHASM_INPUT_EOF) {
+        *pStatus = SHASM_ERR_EOF;
+        status = 0;
+      
+      } else if (c == SHASM_INPUT_IOERR) {
+        *pStatus = SHASM_ERR_IO;
+        status = 0;
+        
+      } else if (c == SHASM_INPUT_INVALID) {
+        *pStatus = SHASM_ERR_OVERSPEC;
+        status = 0;
+      }
+      
+      /* Make sure character matches terminal */
+      if (status && (c != nes.terminal)) {
+        *pStatus = SHASM_ERR_BADNUMESC;
+        status = 0;
+      }
+    }
+    
+    /* If there was a failure, set result to -1 */
+    if (!status) {
+      result = -1;
+    }
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
