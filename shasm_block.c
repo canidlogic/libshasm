@@ -2893,7 +2893,7 @@ static long shasm_block_decode_numeric(
     const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus) {
   /* @@TODO: */
-  return -1;
+  return shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
 }
 
 /*
