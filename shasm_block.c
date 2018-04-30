@@ -1657,7 +1657,7 @@ static int shasm_block_specbuf_detach(
   if (status) {
     cs = shasm_block_circbuf_length(&(psb->cb));
   }
-  
+
   /* Fail if more than one byte buffered */
   if (status && (cs > 1)) {
     status = 0;
@@ -2701,7 +2701,7 @@ static int shasm_block_encode(
  * The decoding algorithm is described below.  Note that this function
  * does not handle numeric escapes.
  * 
- * Before beginning, the function unmarks the speculation buffer and
+ * Before beginning, the function marks the speculation buffer and 
  * resets the decoding map overlay to root position (preserving the
  * nesting level, however).  It also sets an internal nesting level
  * alteration variable to zero, indicating no nesting change.
@@ -2728,9 +2728,10 @@ static int shasm_block_encode(
  * then the stop flag is set.
  * 
  * If branching succeeds, and the string type is {}, and the first
- * branch flag is set, and the most recent branch was for { or } then
- * set the internal nesting level alteration variable to increment or
- * decrement.
+ * branch flag is set, and the most recent branch was for { or }, and a
+ * candidate entity has been recorded (indicating that there is a
+ * decoding key for the bracket) then set the internal nesting level
+ * alteration variable to increment or decrement.
  * 
  * If branching fails, set the stop flag.
  * 
@@ -2739,10 +2740,11 @@ static int shasm_block_encode(
  * After the loop completes, check whether a candidate entity code has
  * been recorded.  If one has, restore the speculation buffer to the
  * most recently marked position and return the candidate entity code.
- * If no candidate entity code has been recorded, then attempt to detach
- * the speculation buffer.  If the detach succeeds, return successfully
- * that no entity code has been read.  If the detach fails, then this
- * function fails with SHASM_ERR_STRCHAR.
+ * If no candidate entity code has been recorded, then restore the
+ * initial marked position and attempt to detach the speculation buffer.
+ * If the detach succeeds, return successfully that no entity code has
+ * been read.  If the detach fails, then this function fails with
+ * SHASM_ERR_STRCHAR.
  * 
  * Before returning, the decoding map overlay is reset, possibly
  * changing the nesting level in the process, depending on the setting
@@ -2758,12 +2760,12 @@ static int shasm_block_encode(
  * - SHASM_ERR_STRCHAR if an input byte can't be decoded (*see below).
  * - SHASM_ERR_STRNEST if the curly nesting level overflowed.
  * 
- * For SHASM_ERR_STRNEST, this function only generates that error if it
+ * For SHASM_ERR_STRCHAR, this function only generates that error if it
  * can't decode something and it is not possible to detach the
  * speculation buffer to give the caller another chance to decode the
  * bytes using the input filter stack.  The stop node system and the
  * kinds of decoding keys that are ignored by the decoding map overlay
- * should ensure that if SHASM_ERR_STRNEST is generated, the bytes
+ * should ensure that if SHASM_ERR_STRCHAR is generated, the bytes
  * couldn't have been decoded by a built-in key or an input override,
  * either.
  * 
@@ -2792,8 +2794,172 @@ static long shasm_block_decode_inner(
     SHASM_IFLSTATE *ps,
     int stype,
     int *pStatus) {
-  /* @@TODO: */
-  return -1;
+  
+  int status = 1;
+  int nest_alt = 0;
+  int stop_flag = 0;
+  int first_branch = 0;
+  long candidate = -1;
+  long v = 0;
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pdo == NULL) || (psb == NULL) || (ps == NULL) ||
+      (pStatus == NULL)) {
+    abort();
+  }
+  
+  if ((stype != SHASM_BLOCK_STYPE_DQUOTE) &&
+      (stype != SHASM_BLOCK_STYPE_SQUOTE) &&
+      (stype != SHASM_BLOCK_STYPE_CURLY)) {
+    abort();
+  }
+  
+  /* Fail immediately if there is already an error status */
+  if (*pStatus != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Reset the decoding overlay to root position and unmark the
+   * speculation buffer */
+  if (status) {
+    if (!shasm_block_dover_reset(pdo, SHASM_BLOCK_DOVER_NEST_STAY)) {
+      /* Shouldn't happen since nesting level isn't being changed */
+      abort();
+    }
+    shasm_block_specbuf_unmark(psb);
+  }
+  
+  /* Mark the initial position before beginning */
+  if (status) {
+    shasm_block_specbuf_mark(psb);
+  }
+  
+  /* Decoding loop */
+  while (status) {
+    
+    /* Read a byte through the speculation buffer */
+    c = shasm_block_specbuf_get(psb, ps);
+    if (c == SHASM_INPUT_EOF) {
+      *pStatus = SHASM_ERR_EOF;
+      status = 0;
+    
+    } else if (c == SHASM_INPUT_IOERR) {
+      *pStatus = SHASM_ERR_IO;
+      status = 0;
+      
+    } else if (c == SHASM_INPUT_INVALID) {
+      *pStatus = SHASM_ERR_OVERSPEC;
+      status = 0;
+    }
+    
+    /* Clear the stop flag and either set or clear the first branch flag
+     * if decoding map is at root position */
+    if (status) {
+      stop_flag = 0;
+      if (shasm_block_dover_recent(pdo) == -1) {
+        first_branch = 1;
+      } else {
+        first_branch = 0;
+      }
+    }
+    
+    /* Attempt to branch on the byte that was read */
+    if (status) {
+      if (shasm_block_dover_branch(pdo, c)) {
+        /* Branch succeeded -- check whether new position has an
+         * associated entity code */
+        v = shasm_block_dover_entity(pdo);
+        if (v != -1) {
+          /* Associated entity, so remember this entity code as the
+           * largest candidate and mark the speculation buffer */
+          candidate = v;
+          shasm_block_specbuf_mark(psb);
+        }
+        
+        /* If new position is a stop node, set the stop flag */
+        if (shasm_block_dover_stopped(pdo)) {
+          stop_flag = 1;
+        }
+        
+        /* Possibly change nesting level if curly string type, first
+         * branch, and a candidate has been recorded */
+        if ((stype == SHASM_BLOCK_STYPE_CURLY) && first_branch &&
+            (candidate != -1)) {
+          /* Alter nesting level if one of the curlies */
+          if (c == SHASM_ASCII_LCURL) {
+            nest_alt = 1;
+          } else if (c == SHASM_ASCII_RCURL) {
+            nest_alt = -1;
+          }
+        }
+      
+      } else {
+        /* Branch failed, so set stop flag */
+        stop_flag = 1;
+      }
+    }
+    
+    /* If stop flag has been set, break out of loop */
+    if (status && stop_flag) {
+      break;
+    }
+  }
+  
+  /* Check whether a candidate entity code has been recorded */
+  if (status && (candidate != -1)) {
+    /* Candidate has been recorded -- restore to marked position and
+     * return the candidate entity code */
+    shasm_block_specbuf_restore(psb);
+    v = candidate;
+    
+  } else if (status) {
+    /* No candidate has been recorded -- restore initial position and
+     * detach the speculation buffer */
+    shasm_block_specbuf_restore(psb);
+    if (!shasm_block_specbuf_detach(psb, ps)) {
+      *pStatus = SHASM_ERR_STRCHAR;
+      status = 0;
+    }
+    
+    /* Return that no status code has been read */
+    if (status) {
+      v = -1;
+    }
+  }
+
+  /* Reset the decoding map overlay, possibly changing the nesting level
+   * depending on the nest_alt variable */
+  if (status && (nest_alt > 0)) {
+    /* Reset decoding map overlay and increment nesting level */
+    if (!shasm_block_dover_reset(pdo, SHASM_BLOCK_DOVER_NEST_INC)) {
+      /* Nesting level overflow */
+      *pStatus = SHASM_ERR_STRNEST;
+      status = 0;
+    }
+    
+  } else if (status && (nest_alt < 0)) {
+    /* Reset decoding map overlay and decrement nesting level */
+    if (!shasm_block_dover_reset(pdo, SHASM_BLOCK_DOVER_NEST_DEC)) {
+      /* Shouldn't happen because we're not incrementing level */
+      abort();
+    }
+    
+  } else if (status) {
+    /* Reset decoding map overlay and keep nesting level as-is */
+    if (!shasm_block_dover_reset(pdo, SHASM_BLOCK_DOVER_NEST_STAY)) {
+      /* Shouldn't happen because we're not incrementing level */
+      abort();
+    }
+  }
+  
+  /* If function has failed, return value must be -1 */
+  if (!status) {
+    v = -1;
+  }
+
+  /* Return entity code or -1 for no entity or error */
+  return v;
 }
 
 /*
@@ -2893,7 +3059,7 @@ static long shasm_block_decode_numeric(
     const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus) {
   /* @@TODO: */
-  return -1;
+  return shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
 }
 
 /*
