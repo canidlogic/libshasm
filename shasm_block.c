@@ -2701,7 +2701,7 @@ static int shasm_block_encode(
  * The decoding algorithm is described below.  Note that this function
  * does not handle numeric escapes.
  * 
- * Before beginning, the function unmarks the speculation buffer and
+ * Before beginning, the function marks the speculation buffer and 
  * resets the decoding map overlay to root position (preserving the
  * nesting level, however).  It also sets an internal nesting level
  * alteration variable to zero, indicating no nesting change.
@@ -2740,10 +2740,11 @@ static int shasm_block_encode(
  * After the loop completes, check whether a candidate entity code has
  * been recorded.  If one has, restore the speculation buffer to the
  * most recently marked position and return the candidate entity code.
- * If no candidate entity code has been recorded, then attempt to detach
- * the speculation buffer.  If the detach succeeds, return successfully
- * that no entity code has been read.  If the detach fails, then this
- * function fails with SHASM_ERR_STRCHAR.
+ * If no candidate entity code has been recorded, then restore the
+ * initial marked position and attempt to detach the speculation buffer.
+ * If the detach succeeds, return successfully that no entity code has
+ * been read.  If the detach fails, then this function fails with
+ * SHASM_ERR_STRCHAR.
  * 
  * Before returning, the decoding map overlay is reset, possibly
  * changing the nesting level in the process, depending on the setting
@@ -2829,6 +2830,11 @@ static long shasm_block_decode_inner(
     shasm_block_specbuf_unmark(psb);
   }
   
+  /* Mark the initial position before beginning */
+  if (status) {
+    shasm_block_specbuf_mark(psb);
+  }
+  
   /* Decoding loop */
   while (status) {
     
@@ -2908,8 +2914,9 @@ static long shasm_block_decode_inner(
     v = candidate;
     
   } else if (status) {
-    /* No candidate has been recorded -- detach the speculation
-     * buffer */
+    /* No candidate has been recorded -- restore initial position and
+     * detach the speculation buffer */
+    shasm_block_specbuf_restore(psb);
     if (!shasm_block_specbuf_detach(psb, ps)) {
       *pStatus = SHASM_ERR_STRCHAR;
       status = 0;
