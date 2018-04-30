@@ -3656,8 +3656,30 @@ static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
  *   does not map to a base-16 digit
  */
 static int shasm_block_base16(int c) {
-  /* @@TODO: */
-  abort();
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if ((c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Translate */
+  if ((c >= SHASM_ASCII_ZERO) && (c <= SHASM_ASCII_NINE)) {
+    result = c - SHASM_ASCII_ZERO;
+  
+  } else if ((c >= SHASM_ASCII_UPPER_A) && (c <= SHASM_ASCII_UPPER_F)) {
+    result = (c - SHASM_ASCII_UPPER_A) + 10;
+  
+  } else if ((c >= SHASM_ASCII_LOWER_A) && (c <= SHASM_ASCII_LOWER_F)) {
+    result = (c - SHASM_ASCII_LOWER_A) + 10;
+    
+  } else {
+    result = -1;
+  }
+    
+  /* Return translated result */
+  return result;
 }
 
 /*
