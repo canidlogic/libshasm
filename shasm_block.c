@@ -3754,8 +3754,143 @@ static long shasm_block_read_numeric(
     int min_len,
     int max_len,
     int *pStatus) {
-  /* @@TODO: */
-  abort();
+  
+  int status = 1;
+  int c = 0;
+  long result = 0;
+  int read_count = 0;
+  int stop_flag = 0;
+  
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL) || (min_len < 1) ||
+      (pStatus == NULL)) {
+    abort();
+  }
+  
+  if (max_len != -1) {
+    if (max_len < min_len) {
+      abort();
+    }
+  }
+  
+  /* Fail immediately if already an error status */
+  if (*pStatus != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Mark the initial position */
+  if (status) {
+    shasm_block_specbuf_mark(psb);
+  }
+  
+  /* Decoding loop */
+  while (status) {
+    /* Read the next character */
+    c = shasm_block_specbuf_get(psb, ps);
+    if (c == SHASM_INPUT_EOF) {
+      *pStatus = SHASM_ERR_EOF;
+      status = 0;
+    
+    } else if (c == SHASM_INPUT_IOERR) {
+      *pStatus = SHASM_ERR_IO;
+      status = 0;
+      
+    } else if (c == SHASM_INPUT_INVALID) {
+      *pStatus = SHASM_ERR_OVERSPEC;
+      status = 0;
+    }
+    
+    /* Try to parse the digit in base-16 or base-10 -- if not
+     * successful, then either backtrack, unmark, and set stop flag if
+     * at least min_len digits have been read, or fail if less than
+     * min_len digits have been read */
+    if (status) {
+      /* Parse in base-16 */
+      c = shasm_block_base16(c);
+      
+      /* If in base-10 mode, interpret digits above 9 as not valid */
+      if ((!base16) && (c > 9)) {
+        c = -1;
+      }
+      
+      /* If unsuccessful, check whether minimum digits have been read */
+      if (c == -1) {
+        if (read_count >= min_len) {
+          /* Minimum satisfied -- backtrack, unmark, and set stop
+           * flag */
+          shasm_block_specbuf_backtrack(psb);
+          shasm_block_specbuf_unmark(psb);
+          stop_flag = 1;
+          
+        } else {
+          /* Minimum not satisfied -- fail */
+          *pStatus = SHASM_ERR_BADNUMESC;
+          status = 0;
+        }
+      }
+    }
+    
+    /* If we got another digit, add it into the numeric value, failing
+     * if overflow */
+    if (status && (c != -1)) {
+      /* Multiply by number base, watching for overflow */
+      if (base16) {
+        /* Base 16 */
+        if (result <= (LONG_MAX / 16)) {
+          result *= 16;
+        } else {
+          *pStatus = SHASM_ERR_NUMESCRANGE;
+          status = 0;
+        }
+        
+      } else {
+        /* Base 10 */
+        if (result <= (LONG_MAX / 10)) {
+          result *= 10;
+        } else {
+          *pStatus = SHASM_ERR_NUMESCRANGE;
+          status = 0;
+        }
+      }
+      
+      /* Add current digit value to result, watching for overflow */
+      if (status && (result <= LONG_MAX - c)) {
+        result += c;
+      } else {
+        *pStatus = SHASM_ERR_NUMESCRANGE;
+        status = 0;
+      }
+    }
+    
+    /* Increase the read digits count, with a ceiling at INT_MAX */
+    if (status) {
+      if (read_count < INT_MAX) {
+        read_count++;
+      }
+    }
+    
+    /* This will be the last time through the loop if we've reached the
+     * maximum digit count */
+    if (status && (read_count >= max_len)) {
+      stop_flag = 1;
+    }
+    
+    /* Break out of loop if maximum number of digits read */
+    if (status && stop_flag) {
+      break;
+    }
+  }
+  
+  /* Unmark the speculation buffer */
+  shasm_block_specbuf_unmark(psb);
+  
+  /* Set result to -1 if failure */
+  if (!status) {
+    result = -1;
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
