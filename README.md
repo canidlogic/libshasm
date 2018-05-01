@@ -4,7 +4,7 @@ libshasm (pronounced "lib sha-ZAM") is a library that implements a Shastina lang
 
 For a specification of the Shastina language, see the [Canidtech website](https://www.canidtech.com/).  See the "Divergences" section below in this readme for differences between Shastina as described in the specification and Shastina as implemented in libshasm.
 
-As of March 19, 2018, the input filter chain and part of the block reader have been completed.  This readme describes the current state of the project.
+As of April 30, 2018, the input filter chain and most of the block reader have been completed.  This readme describes the current state of the project.
 
 Development work on this library is being handled by Noah Johnson (canidlogic on GitHub).  He can be reached by email at noah.johnson@loupmail.com
 
@@ -144,7 +144,7 @@ The current development roadmap is as follows.  Section references are to the Sh
 - [x] Input filtering chain (section 3)
 - [x] Tokenization function (section 4)
 - [x] Regular string encoding (section 5.2)
-- [ ] Regular string decoding (section 5.1)
+- [x] Regular string decoding (section 5.1)
 - [ ] Base-16 special mode (section 5.3)
 - [ ] Base-85 special mode (section 5.4)
 - [ ] Numeric literals (section 6.2)
@@ -181,13 +181,17 @@ To reach the current goal, the following steps will be taken, in the order shown
 - [x] Implement speculation buffer
 - [x] Implement decoding overlay
 - [x] Write innermost decoding function
-- [ ] Write numeric escape inner function
+- [x] Write numeric escape inner function
 
 The basic approach is to write the interfaces first (first five steps), add placeholders (next step), and then finish the functions starting with the outermost decoding function and working inward, but implement the numeric escape wrapper after the innermost function.  At first, only empty strings (terminal key immediately) are supported.  Then, strings with only extended UTF-8 characters in input override mode are supported.  Then, everything except numeric escapes.  Finally, full decoding support.
 
 These steps will be performed in separate branches, with results merged back into master when complete.  At the end of this process, the block reading architecture will be established and the token reader will be done.
 
 ## 5. Releases
+
+### 0.2.2 (alpha)
+
+Finished the regular string reader framework by implementing the full decoder.
 
 ### 0.2.1 (alpha)
 
