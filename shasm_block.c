@@ -513,6 +513,15 @@ static int shasm_block_surbuf_finish(SHASM_BLOCK_SURBUF *psb);
 
 static long shasm_block_read_utf8(SHASM_IFLSTATE *ps);
 
+static int shasm_block_base16(int c);
+static long shasm_block_read_numeric(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int base16,
+    int min_len,
+    int max_len,
+    int *pStatus);
+
 /*
  * Set a block reader into an error state.
  * 
@@ -3030,6 +3039,11 @@ static long shasm_block_decode_inner(
  * mismatches the registered terminal byte value, fail with the error
  * SHASM_ERR_BADNUMESC.  Otherwise, return the numeric escape.
  * 
+ * The provided escape list structure must not have NULL function
+ * pointers of a fault will occur.  It is assumed that the caller has
+ * provided default functions if the original client used NULL function
+ * pointer values.
+ * 
  * Parameters:
  * 
  *   pdo - the decoding map overlay
@@ -3058,8 +3072,128 @@ static long shasm_block_decode_numeric(
     int stype,
     const SHASM_BLOCK_ESCLIST *pel,
     int *pStatus) {
-  /* @@TODO: */
-  return shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
+  
+  long result = 0;
+  int status = 1;
+  int escaped = 0;
+  int c = 0;
+  SHASM_BLOCK_NUMESCAPE nes;
+  
+  /* Initialize structure */
+  memset(&nes, 0, sizeof(SHASM_BLOCK_NUMESCAPE));
+  
+  /* Check pel parameter (rest of parameters will be checked when passed
+   * through) */
+  if (pel == NULL) {
+    abort();
+  }
+  if (pel->fpEscQuery == NULL) {
+    abort();
+  }
+  
+  /* Call through to the inner decoding function */
+  result = shasm_block_decode_inner(pdo, psb, ps, stype, pStatus);
+  
+  /* If inner decoding function returned an entity, query the escape
+   * list to see if this matches a numeric escape entity code, setting
+   * the escaped flag and reading the parameters into nes if so */
+  if (result >= 0) {
+    /* Query for a numeric escape */
+    if ((*(pel->fpEscQuery))(pel->pCustom, result, &nes)) {
+      escaped = 1;
+    }
+    
+    /* Check max_entity and terminal fields if escaped flag is set --
+     * other fields will either be checked by shasm_block_read_numeric
+     * or they are flags */
+    if (escaped) {
+      /* Check max_entity */
+      if (nes.max_entity < 0) {
+        abort();
+      }
+      
+      /* Check terminal (if it is not the special -1 value) */
+      if (nes.terminal != -1) {
+        /* Make sure terminal is in range 0-255 (if not -1) */
+        if ((nes.terminal < 0) || (nes.terminal > 255)) {
+          abort();
+        }
+        
+        /* Make sure terminal is not a digit */
+        c = shasm_block_base16(nes.terminal);
+        if (!nes.base16) {
+          if (c > 9) {
+            c == -1;
+          }
+        }
+        if (c != -1) {
+          /* Terminal is a digit in the selected number base */
+          abort();
+        }
+      }
+    }
+  }
+  
+  /* Handle numeric escape if we just read a numeric escape entity */
+  if (escaped) {
+    /* First of all, read the numeric value */
+    result = shasm_block_read_numeric(
+                psb,
+                ps,
+                nes.base16,
+                nes.min_len,
+                nes.max_len,
+                pStatus);
+    if (result == -1) {
+      status = 0;
+    }
+
+    /* Fail if out of maximum entity range */
+    if (status && (result > nes.max_entity)) {
+      *pStatus = SHASM_ERR_NUMESCRANGE;
+      status = 0;
+    }
+    
+    /* Fail if in surrogate range and block surrogates mode on */
+    if (status && nes.block_surrogates &&
+          (result >= SHASM_BLOCK_MINSURROGATE) &&
+          (result <= SHASM_BLOCK_MAXSURROGATE)) {
+      *pStatus = SHASM_ERR_NUMESCSUR;
+      status = 0;
+    }
+    
+    /* If there's a terminal, read it */
+    if (status && (nes.terminal != -1)) {
+      /* Read a character */
+      c = shasm_block_specbuf_get(psb, ps);
+      if (c == SHASM_INPUT_EOF) {
+        *pStatus = SHASM_ERR_EOF;
+        status = 0;
+      
+      } else if (c == SHASM_INPUT_IOERR) {
+        *pStatus = SHASM_ERR_IO;
+        status = 0;
+        
+      } else if (c == SHASM_INPUT_INVALID) {
+        *pStatus = SHASM_ERR_OVERSPEC;
+        status = 0;
+      }
+      
+      /* Make sure character matches terminal */
+      if (status && (c != nes.terminal)) {
+        *pStatus = SHASM_ERR_BADNUMESC;
+        status = 0;
+      }
+    }
+    
+    /* If there was a failure, set result to -1 */
+    if (!status) {
+      result = -1;
+    }
+  }
+  
+  /* Return result */
+  return result;
 }
 
 /*
@@ -3614,6 +3748,270 @@ static long shasm_block_read_utf8(SHASM_IFLSTATE *ps) {
      * return zero to indicate no extended UTF-8 codepoint present */
     shasm_input_back(ps);
     result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Translate an ASCII character code into a base-16 digit.
+ * 
+ * The provided character code must be in range 0-255 or a fault occurs.
+ * 
+ * Character codes in range of ASCII decimal digits 0-9 are translated
+ * to digit values 0-9.
+ * 
+ * Character codes in range of ASCII uppercase A-F are translated to
+ * digit values 10-15.
+ * 
+ * Character codes in range of ASCII lowercase a-f are translated to
+ * digit values 10-15.
+ * 
+ * All other character codes return -1 to indicate that the provided
+ * character code doesn't map to a base-16 digit.
+ * 
+ * Parameters:
+ * 
+ *   c - the character code to translate
+ * 
+ * Return:
+ * 
+ *   the translated numeric digit value, or -1 if the character code
+ *   does not map to a base-16 digit
+ */
+static int shasm_block_base16(int c) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if ((c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Translate */
+  if ((c >= SHASM_ASCII_ZERO) && (c <= SHASM_ASCII_NINE)) {
+    result = c - SHASM_ASCII_ZERO;
+  
+  } else if ((c >= SHASM_ASCII_UPPER_A) && (c <= SHASM_ASCII_UPPER_F)) {
+    result = (c - SHASM_ASCII_UPPER_A) + 10;
+  
+  } else if ((c >= SHASM_ASCII_LOWER_A) && (c <= SHASM_ASCII_LOWER_F)) {
+    result = (c - SHASM_ASCII_LOWER_A) + 10;
+    
+  } else {
+    result = -1;
+  }
+    
+  /* Return translated result */
+  return result;
+}
+
+/*
+ * Read a base-10 or base-16 integer encoded in ASCII.
+ * 
+ * The characters are read through the provided speculation buffer using
+ * the provided input filter stack.  The speculation buffer can be in
+ * any marked state upon entry, but upon exit it will always be
+ * unmarked.
+ * 
+ * If base16 is non-zero, then the integer is encoded in base-16, with
+ * ASCII 0-9, A-F, and a-f recognized as digits.  If base-16 is zero,
+ * then the integer is encoded in base-10, with ASCII 0-9 recognized as
+ * digits.  No sign is allowed to precede the digits, so this function
+ * can only read positive values.
+ * 
+ * min_len is the minimum number of digits that must be read.  This
+ * value must be one or greater.
+ * 
+ * max_len is the maximum number of digits that may be read.  This value
+ * must either be -1 (indicating there is no maximum), or it must be
+ * greater than or equal to min_len.
+ * 
+ * pStatus must not be NULL.  It points to the error status.  If the
+ * error status is not SHASM_OKAY upon entry to this function, this
+ * function fails immediately without performing any action.
+ * 
+ * This function begins by marking the speculation buffer with the
+ * initial position.  Then, it reads one or more base-10 or base-16
+ * digits until one of the following happens:
+ * 
+ * (1) max_len is not -1 and a total of max_len digits have been read.
+ * The function ends successfully in this case, returning the numeric
+ * value that has been parsed and clearing any marks in the speculation
+ * buffer.
+ * 
+ * (2) A non-digit character is read.  If at least min_len digits have
+ * already been read, the speculation buffer is backtracked by one, the
+ * buffer is then unmarked, and the function successfully returns the
+ * numeric value that has been parsed.  If less than min_len digits have
+ * been read, the function fails with SHASM_ERR_BADNUMESC.
+ * 
+ * (3) The numeric value being parsed exceeds LONG_MAX.  In this case,
+ * the function fails with SHASM_ERR_NUMESCRANGE.
+ * 
+ * (4) SHASM_INPUT_EOF, SHASM_INPUT_IOERR, or SHASM_INPUT_INVALID are
+ * read from the speculation buffer.  The function fails with 
+ * SHASM_ERR_EOF, SHASM_ERR_IO, or SHASM_ERR_OVERSPEC, respectively.
+ * 
+ * Parameters:
+ * 
+ *   psb - the speculation buffer
+ * 
+ *   ps - the input filter stack
+ * 
+ *   base16 - non-zero for base-16 mode, zero for base-10 mode
+ * 
+ *   min_len - the minimum number of digits to read
+ * 
+ *   max_len - the maximum number of digits to read, or -1 if no maximum
+ * 
+ *   pStatus - pointer to the error status
+ * 
+ * Return:
+ * 
+ *   the numeric value that was read, or -1 if there was an error
+ */
+static long shasm_block_read_numeric(
+    SHASM_BLOCK_SPECBUF *psb,
+    SHASM_IFLSTATE *ps,
+    int base16,
+    int min_len,
+    int max_len,
+    int *pStatus) {
+  
+  int status = 1;
+  int c = 0;
+  long result = 0;
+  int read_count = 0;
+  int stop_flag = 0;
+
+  /* Check parameters */
+  if ((psb == NULL) || (ps == NULL) || (min_len < 1) ||
+      (pStatus == NULL)) {
+    abort();
+  }
+  
+  if (max_len != -1) {
+    if (max_len < min_len) {
+      abort();
+    }
+  }
+  
+  /* Fail immediately if already an error status */
+  if (*pStatus != SHASM_OKAY) {
+    status = 0;
+  }
+  
+  /* Mark the initial position */
+  if (status) {
+    shasm_block_specbuf_mark(psb);
+  }
+  
+  /* Decoding loop */
+  while (status) {
+    /* Read the next character */
+    c = shasm_block_specbuf_get(psb, ps);
+    if (c == SHASM_INPUT_EOF) {
+      *pStatus = SHASM_ERR_EOF;
+      status = 0;
+    
+    } else if (c == SHASM_INPUT_IOERR) {
+      *pStatus = SHASM_ERR_IO;
+      status = 0;
+      
+    } else if (c == SHASM_INPUT_INVALID) {
+      *pStatus = SHASM_ERR_OVERSPEC;
+      status = 0;
+    }
+    
+    /* Try to parse the digit in base-16 or base-10 -- if not
+     * successful, then either backtrack, unmark, and set stop flag if
+     * at least min_len digits have been read, or fail if less than
+     * min_len digits have been read */
+    if (status) {
+      /* Parse in base-16 */
+      c = shasm_block_base16(c);
+
+      /* If in base-10 mode, interpret digits above 9 as not valid */
+      if ((!base16) && (c > 9)) {
+        c = -1;
+      }
+      
+      /* If unsuccessful, check whether minimum digits have been read */
+      if (c == -1) {
+        if (read_count >= min_len) {
+          /* Minimum satisfied -- backtrack, unmark, and set stop
+           * flag */
+          shasm_block_specbuf_backtrack(psb);
+          shasm_block_specbuf_unmark(psb);
+          stop_flag = 1;
+          
+        } else {
+          /* Minimum not satisfied -- fail */
+          *pStatus = SHASM_ERR_BADNUMESC;
+          status = 0;
+        }
+      }
+    }
+    
+    /* If we got another digit, add it into the numeric value, failing
+     * if overflow */
+    if (status && (c != -1)) {
+      /* Multiply by number base, watching for overflow */
+      if (base16) {
+        /* Base 16 */
+        if (result <= (LONG_MAX / 16)) {
+          result *= 16;
+        } else {
+          *pStatus = SHASM_ERR_NUMESCRANGE;
+          status = 0;
+        }
+        
+      } else {
+        /* Base 10 */
+        if (result <= (LONG_MAX / 10)) {
+          result *= 10;
+        } else {
+          *pStatus = SHASM_ERR_NUMESCRANGE;
+          status = 0;
+        }
+      }
+      
+      /* Add current digit value to result, watching for overflow */
+      if (status && (result <= LONG_MAX - c)) {
+        result += c;
+      } else {
+        *pStatus = SHASM_ERR_NUMESCRANGE;
+        status = 0;
+      }
+    }
+
+    /* Increase the read digits count, with a ceiling at INT_MAX */
+    if (status) {
+      if (read_count < INT_MAX) {
+        read_count++;
+      }
+    }
+    
+    /* This will be the last time through the loop if we've reached the
+     * maximum digit count (and there is a maximum digit count) */
+    if (status && (max_len != -1) && (read_count >= max_len)) {
+      stop_flag = 1;
+    }
+    
+    /* Break out of loop if maximum number of digits read */
+    if (status && stop_flag) {
+      break;
+    }
+  }
+  
+  /* Unmark the speculation buffer */
+  shasm_block_specbuf_unmark(psb);
+  
+  /* Set result to -1 if failure */
+  if (!status) {
+    result = -1;
   }
   
   /* Return result */
