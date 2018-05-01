@@ -3147,7 +3147,7 @@ static long shasm_block_decode_numeric(
     if (result == -1) {
       status = 0;
     }
-    
+
     /* Fail if out of maximum entity range */
     if (status && (result > nes.max_entity)) {
       *pStatus = SHASM_ERR_NUMESCRANGE;
@@ -3885,7 +3885,7 @@ static long shasm_block_read_numeric(
   long result = 0;
   int read_count = 0;
   int stop_flag = 0;
-  
+
   /* Check parameters */
   if ((psb == NULL) || (ps == NULL) || (min_len < 1) ||
       (pStatus == NULL)) {
@@ -3932,7 +3932,7 @@ static long shasm_block_read_numeric(
     if (status) {
       /* Parse in base-16 */
       c = shasm_block_base16(c);
-      
+
       /* If in base-10 mode, interpret digits above 9 as not valid */
       if ((!base16) && (c > 9)) {
         c = -1;
@@ -3986,7 +3986,7 @@ static long shasm_block_read_numeric(
         status = 0;
       }
     }
-    
+
     /* Increase the read digits count, with a ceiling at INT_MAX */
     if (status) {
       if (read_count < INT_MAX) {
@@ -3995,8 +3995,8 @@ static long shasm_block_read_numeric(
     }
     
     /* This will be the last time through the loop if we've reached the
-     * maximum digit count */
-    if (status && (read_count >= max_len)) {
+     * maximum digit count (and there is a maximum digit count) */
+    if (status && (max_len != -1) && (read_count >= max_len)) {
       stop_flag = 1;
     }
     
