@@ -3,7 +3,7 @@
 The Shastina Metainterpreter (shastina) is an implementation of the Shastina metalanguage, which allows for the rapid implementation of special-purpose programming languages.
 
 ## 2. Project status
-This project has been dormant for a few months, but as of October, 2018, work has restarted.
+This project has been dormant for a few months, but as of October 2018, work has restarted.
 
 The new Shastina implementation has a greatly simplified structure that makes it more practical to use, more efficient, and more flexible.
 
