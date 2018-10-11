@@ -91,6 +91,8 @@ typedef struct {
 /* Function prototypes */
 static void snfilter_reset(SNFILTER *pFilter);
 static int snfilter_read(SNFILTER *pFilter, FILE *pIn);
+static long snfilter_count(SNFILTER *pFilter);
+static int snfilter_bomflag(SNFILTER *pFilter);
 
 /*
  * Reset an input filter back to its original state.
@@ -175,11 +177,8 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     /* If the first character is the first character of a UTF-8 BOM,
      * read and filter out the BOM; else, unread it and proceed */
     if ((!err_num) && (c == SNFILTER_BOM_1)) {
-      /* We have a UTF-8 BOM; begin by setting the flag */
-      pFilter->bom_present = 1;
-      
-      /* Read the second character and confirm it's present and part of
-       * the BOM */
+      /* We have a UTF-8 BOM; read the second character and confirm it's
+       * present and part of the BOM */
       c = getc(pIn);
       if (c == EOF) {
         if (feof(pIn)) {
@@ -210,6 +209,11 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
         if ((!err_num) && (c != SNFILTER_BOM_3)) {
           err_num = SNFILTER_BADSIG;
         }
+      }
+      
+      /* If we got here successfully, set the BOM flag */
+      if (!err_num) {
+        pFilter->bom_present = 1;
       }
       
     } else if (!err_num) {
@@ -281,8 +285,7 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
         /* Not the very first character -- increase line count by one if
          * the previous character was LF and the line count is not at
          * the overflow value of LONG_MAX */
-        if ((pFilter->c == ASCII_LF) &&
-              (pFilter->line_count < LONG_MAX)) {
+        if ((c == ASCII_LF) && (pFilter->line_count < LONG_MAX)) {
           (pFilter->line_count)++;
         }
         pFilter->c = c;
@@ -290,18 +293,96 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     }
   }
   
-  /* Clear the pushback flag if it is set */
-  if (!err_num) {
-    pFilter->pushback = 0;
-  }
+  /* Clear the pushback flag if it is set -- even if there has been an
+   * error or EOF condition */
+  pFilter->pushback = 0;
   
-  /* If we've encountered an error, write it into the structure */
+  /* If we've encountered an error (or EOF), write it into the
+   * structure */
   if (err_num) {
     pFilter->c = err_num;
   }
   
   /* Return the character */
   return (pFilter->c);
+}
+
+/*
+ * Return the current line count.
+ * 
+ * The line count is always at least one and at most LONG_MAX.  The
+ * value of LONG_MAX is an overflow value, so any count of lines above
+ * that will just remain at LONG_MAX.
+ * 
+ * The line count is affected by pushback mode, changing backwards if
+ * characters are pushed back before a line break.
+ * 
+ * Parameters:
+ * 
+ *   pFilter - the input filter state
+ * 
+ * Return:
+ * 
+ *   the current line count
+ */
+static long snfilter_count(SNFILTER *pFilter) {
+  
+  long lc = 0;
+  
+  /* Check parameter */
+  if (pFilter == NULL) {
+    abort();
+  }
+  
+  /* Read current line count */
+  lc = pFilter->line_count;
+  
+  /* If line count is zero, change it to one to indicate the line count
+   * at the start of the file */
+  if (lc < 1) {
+    lc = 1;
+  }
+  
+  /* If we're not in pushback mode, c is LF, we're not at the very
+   * beginning of the file, and line_count is less than LONG_MAX,
+   * increase the line count by one */
+  if ((!(pFilter->pushback)) && (pFilter->line_count > 0) &&
+        (pFilter->c == ASCII_LF) && (lc < LONG_MAX)) {
+    lc++;
+  }
+  
+  /* Return the adjusted line count */
+  return lc;
+}
+
+/*
+ * Check whether the Byte Order Mark flag is set.
+ * 
+ * This flag will be set after the first filtered byte is read if a
+ * UTF-8 Byte Order Mark (BOM) was filtered out at the very start of the
+ * file.  If no BOM was was present, zero will be returned.
+ * 
+ * This is only meaningful after the first call to snfilter_read.  At
+ * the initial state, the BOM flag will always be clear because the
+ * start of the file has not been read yet.
+ * 
+ * Parameter:
+ * 
+ *   pFilter - the filter state
+ * 
+ * Return:
+ * 
+ *   non-zero if BOM flag set, zero if clear
+ */
+static int snfilter_bomflag(SNFILTER *pFilter) {
+  
+  /* Check parameter */
+  if (pFilter == NULL) {
+    abort();
+  }
+  
+  /* Return flag */
+  return (pFilter->bom_present);
 }
 
 /*
@@ -324,6 +405,8 @@ int main(int argc, char *argv[]) {
   } else if (c == SNFILTER_BADSIG) {
     fprintf(stderr, "Bad signature!\n");
   }
+  printf("\nLine count: %ld\n", snfilter_count(&fil));
+  printf("BOM flag  : %d\n", snfilter_bomflag(&fil));
   
   return 0;
 }
