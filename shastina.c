@@ -93,6 +93,7 @@ static void snfilter_reset(SNFILTER *pFilter);
 static int snfilter_read(SNFILTER *pFilter, FILE *pIn);
 static long snfilter_count(SNFILTER *pFilter);
 static int snfilter_bomflag(SNFILTER *pFilter);
+static int snfilter_pushback(SNFILTER *pFilter);
 
 /*
  * Reset an input filter back to its original state.
@@ -386,6 +387,49 @@ static int snfilter_bomflag(SNFILTER *pFilter) {
 }
 
 /*
+ * Set the pushback flag, so the character that was just read will be
+ * read again.
+ * 
+ * This call is ignored if the filter state is currently in an EOF or
+ * error condition.
+ * 
+ * The call fails if the filter state is already in pushback mode or if
+ * no characters have been read yet.
+ * 
+ * Parameters:
+ * 
+ *   pFilter - the filter state
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if pushback mode could not be set
+ */
+static int snfilter_pushback(SNFILTER *pFilter) {
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pFilter == NULL) {
+    abort();
+  }
+  
+  /* Only proceed if not in special state */
+  if ((pFilter->line_count == 0) || (pFilter->c >= 0)) {
+    
+    /* We can only set the pushback flag if it is not already set and at
+     * least one character has been read */
+    if ((pFilter->line_count > 0) && (!(pFilter->pushback))) {
+      pFilter->pushback = 1;
+    } else {
+      status = 0;
+    }
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
@@ -395,10 +439,23 @@ int main(int argc, char *argv[]) {
   
   snfilter_reset(&fil);
   
+  /* (Double all lowercase letters) */
+  
   for(c = snfilter_read(&fil, stdin);
       c >= 0;
       c = snfilter_read(&fil, stdin)) {
+    
     putchar(c);
+    if ((c >= 'a') && (c <= 'z')) {
+      if (!snfilter_pushback(&fil)) {
+        abort();
+      }
+      c = snfilter_read(&fil, stdin);
+      if (c <= 0) {
+        abort();
+      }
+      putchar(c);
+    }
   }
   if (c == SNFILTER_IOERR) {
     fprintf(stderr, "I/O error!\n");
