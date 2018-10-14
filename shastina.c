@@ -9,13 +9,13 @@
 #include <string.h>
 
 /* 
- * Status constants for the input filter.
+ * Error constants.
  * 
  * These must all be negative.
  */
-#define SNFILTER_IOERR  (-1)  /* I/O error */
-#define SNFILTER_EOF    (-2)  /* End Of File */
-#define SNFILTER_BADSIG (-3)  /* Unrecognized file signature */
+#define SNERR_IOERR   (-1)  /* I/O error */
+#define SNERR_EOF     (-2)  /* End Of File */
+#define SNERR_BADSIG  (-3)  /* Unrecognized file signature */
 
 /*
  * ASCII constants.
@@ -57,10 +57,10 @@ typedef struct {
    * valid if line_count is greater than zero.  Otherwise, no characters
    * have been read yet and this field is ignored.
    * 
-   * The special values of SNFILTER_EOF and SNFILTER_IOERR mean End Of
-   * File or I/O error have been encountered, respectively.
+   * The special values of SNERR_EOF and SNERR_IOERR mean End Of File or
+   * I/O error have been encountered, respectively.
    * 
-   * SNFILTER_BADSIG means that the first character or the first two
+   * SNERR_BADSIG means that the first character or the first two 
    * characters of the file matched a UTF-8 Byte Order Mark (BOM), but
    * a complete BOM could not be read.
    */
@@ -126,11 +126,11 @@ static void snfilter_reset(SNFILTER *pFilter) {
  * 
  * The next character is returned as an unsigned byte value (0-255).
  * 
- * SNFILTER_EOF is returned if End Of File has been reached.
+ * SNERR_EOF is returned if End Of File has been reached.
  * 
- * SNFILTER_IOERR is returned if an I/O error has been encountered.
+ * SNERR_IOERR is returned if an I/O error has been encountered.
  * 
- * SNFILTER_BADSIG is returned if one or two characters corresponding to
+ * SNERR_BADSIG is returned if one or two characters corresponding to 
  * the start of a UTF-8 Byte Order Mark (BOM) were read at the start of
  * the file, but the complete UTF-8 BOM could not be read.  The filter
  * will not continue reading the file in this case.
@@ -146,8 +146,8 @@ static void snfilter_reset(SNFILTER *pFilter) {
  * 
  * Return:
  * 
- *   the next unsigned byte value, or SNFILTER_EOF, SNFILTER_IOERR, or
- *   SNFILTER_BADSIG
+ *   the next unsigned byte value, or SNERR_EOF, SNERR_IOERR, or
+ *   SNERR_BADSIG
  */
 static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
   
@@ -169,9 +169,9 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     c = getc(pIn);
     if (c == EOF) {
       if (feof(pIn)) {
-        err_num = SNFILTER_EOF;
+        err_num = SNERR_EOF;
       } else {
-        err_num = SNFILTER_IOERR;
+        err_num = SNERR_IOERR;
       }
     }
     
@@ -184,14 +184,14 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
       if (c == EOF) {
         if (feof(pIn)) {
           /* File ends before complete UTF-8 BOM */
-          err_num = SNFILTER_BADSIG;
+          err_num = SNERR_BADSIG;
         } else {
           /* I/O error */
-          err_num = SNFILTER_IOERR;
+          err_num = SNERR_IOERR;
         }
       }
       if ((!err_num) && (c != SNFILTER_BOM_2)) {
-        err_num = SNFILTER_BADSIG;
+        err_num = SNERR_BADSIG;
       }
       
       /* Read the third character and confirm it's present and part of
@@ -201,14 +201,14 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
         if (c == EOF) {
           if (feof(pIn)) {
             /* File ends before complete UTF-8 BOM */
-            err_num = SNFILTER_BADSIG;
+            err_num = SNERR_BADSIG;
           } else {
             /* I/O error */
-            err_num = SNFILTER_IOERR;
+            err_num = SNERR_IOERR;
           }
         }
         if ((!err_num) && (c != SNFILTER_BOM_3)) {
-          err_num = SNFILTER_BADSIG;
+          err_num = SNERR_BADSIG;
         }
       }
       
@@ -220,7 +220,7 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     } else if (!err_num) {
       /* First character not part of a UTF-8 BOM; unread it */
       if (ungetc(c, pIn) == EOF) {
-        err_num = SNFILTER_IOERR;
+        err_num = SNERR_IOERR;
       }
     }
   }
@@ -234,9 +234,9 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     c = getc(pIn);
     if (c == EOF) {
       if (feof(pIn)) {
-        err_num = SNFILTER_EOF;
+        err_num = SNERR_EOF;
       } else {
-        err_num = SNFILTER_IOERR;
+        err_num = SNERR_IOERR;
       }
     }
     
@@ -253,7 +253,7 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
           c2 = -1;
         } else {
           /* I/O error */
-          err_num = SNFILTER_IOERR;
+          err_num = SNERR_IOERR;
         }
       }
       
@@ -264,7 +264,7 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
               (c == ASCII_CR) && (c2 != ASCII_LF))) {
         if (c2 != -1) {
           if (ungetc(c2, pIn) == EOF) {
-            err_num = SNFILTER_IOERR;
+            err_num = SNERR_IOERR;
           }
         }
       }
@@ -457,9 +457,9 @@ int main(int argc, char *argv[]) {
       putchar(c);
     }
   }
-  if (c == SNFILTER_IOERR) {
+  if (c == SNERR_IOERR) {
     fprintf(stderr, "I/O error!\n");
-  } else if (c == SNFILTER_BADSIG) {
+  } else if (c == SNERR_BADSIG) {
     fprintf(stderr, "Bad signature!\n");
   }
   printf("\nLine count: %ld\n", snfilter_count(&fil));
