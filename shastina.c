@@ -13,12 +13,13 @@
  * 
  * These must all be negative.
  */
-#define SNERR_IOERR   (-1)  /* I/O error */
-#define SNERR_EOF     (-2)  /* End Of File */
-#define SNERR_BADSIG  (-3)  /* Unrecognized file signature */
-#define SNERR_OPENSTR (-4)  /* File ends in middle of string */
-#define SNERR_LONGSTR (-5)  /* String is too long */
-#define SNERR_NULLCHR (-6)  /* Null character encountered in string */
+#define SNERR_IOERR     (-1)  /* I/O error */
+#define SNERR_EOF       (-2)  /* End Of File */
+#define SNERR_BADSIG    (-3)  /* Unrecognized file signature */
+#define SNERR_OPENSTR   (-4)  /* File ends in middle of string */
+#define SNERR_LONGSTR   (-5)  /* String is too long */
+#define SNERR_NULLCHR   (-6)  /* Null character encountered in string */
+#define SNERR_DEEPCURLY (-7)  /* Too much curly nesting in string */
 
 /*
  * ASCII constants.
@@ -180,6 +181,11 @@ static int snchar_isinclusive(int c);
 static int snchar_isexclusive(int c);
 
 static int snstr_readQuoted(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter);
+
+static int snstr_readCurlied(
     SNBUFFER * pBuffer,
     FILE     * pIn,
     SNFILTER * pFilter);
@@ -913,6 +919,8 @@ static int snchar_isexclusive(int c) {
  * 
  *   pIn - the input file to read the string data from
  * 
+ *   pFilter - the input filter
+ * 
  * Return:
  * 
  *   zero if successful, or one of the SNERR constants if error
@@ -930,6 +938,9 @@ static int snstr_readQuoted(
   if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
     abort();
   }
+  
+  /* Reset the buffer */
+  snbuffer_reset(pBuffer, 0);
   
   /* Read all string data */
   while (!err_num) {
@@ -976,6 +987,116 @@ static int snstr_readQuoted(
 }
 
 /*
+ * Read a curly-quoted string.
+ * 
+ * pBuffer is the buffer into which the string data will be read.  It
+ * must be properly initialized.  This function will reset the buffer
+ * and then write the string data into it.
+ * 
+ * pIn is the file to read data from.  It must be open for read access.
+ * Reading is fully sequential.
+ * 
+ * pFilter is the input filter to read the data through.  It should be
+ * in the proper state.
+ * 
+ * This function assumes that the opening curly bracket as already been
+ * read.  The first character read is therefore the first character of
+ * string data.  The closing curly bracket will be read and consumed by
+ * this function.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to read the string data into
+ * 
+ *   pIn - the input file to read the string data from
+ * 
+ *   pFilter - the input filter
+ * 
+ * Return:
+ * 
+ *   zero if successful, or one of the SNERR constants if error
+ */
+static int snstr_readCurlied(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter) {
+  
+  int err_num = 0;
+  int esc_flag = 0;
+  long nest_level = 1;
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
+    abort();
+  }
+  
+  /* Reset the buffer */
+  snbuffer_reset(pBuffer, 0);
+  
+  /* Read all string data */
+  while (!err_num) {
+    
+    /* Read a character */
+    c = snfilter_read(pFilter, pIn);
+    if (c < 0) {
+      if (c == SNERR_EOF) {
+        err_num = SNERR_OPENSTR;
+      } else {
+        err_num = c;
+      }
+    }
+    
+    /* If escape flag is not set, update the nesting level if current
+     * character is a curly bracket */
+    if ((!err_num) && (!esc_flag)) {
+      if (c == ASCII_LCURL) {
+        
+        /* Left curly -- increase nesting level, watching for
+         * overflow */
+        if (nest_level < LONG_MAX) {
+          nest_level++;
+        } else {
+          err_num = SNERR_DEEPCURLY;
+        }
+        
+      } else if (c == ASCII_RCURL) {
+        /* Right curly -- decrease nesting level */
+        nest_level--;
+      }
+    }
+    
+    /* If nesting level has been brought down to zero, leave loop */
+    if ((!err_num) && (nest_level < 1)) {
+      break;
+    }
+    
+    /* Update escape flag -- set if current character is a backslash,
+     * clear otherwise */
+    if ((!err_num) && (c == ASCII_BACKSLASH)) {
+      esc_flag = 1;
+    } else {
+      esc_flag = 0;
+    }
+    
+    /* Make sure character is not a null character */
+    if ((!err_num) && (c == 0)) {
+      err_num = SNERR_NULLCHR;
+    }
+    
+    /* Append character to buffer */
+    if (!err_num) {
+      if (!snbuffer_append(pBuffer, c)) {
+        err_num = SNERR_LONGSTR;
+      }
+    }
+  }
+  
+  /* Return okay or error code */
+  return err_num;
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
@@ -987,7 +1108,7 @@ int main(int argc, char *argv[]) {
   snfilter_reset(&fil);
   snbuffer_init(&buf, 4, 65535);
   
-  retval = snstr_readQuoted(&buf, stdin, &fil);
+  retval = snstr_readCurlied(&buf, stdin, &fil);
   if (retval == 0) {
     printf("%s\n", snbuffer_get(&buf));
   } else {
