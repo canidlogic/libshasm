@@ -16,12 +16,35 @@
 #define SNERR_IOERR   (-1)  /* I/O error */
 #define SNERR_EOF     (-2)  /* End Of File */
 #define SNERR_BADSIG  (-3)  /* Unrecognized file signature */
+#define SNERR_OPENSTR (-4)  /* File ends in middle of string */
+#define SNERR_LONGSTR (-5)  /* String is too long */
+#define SNERR_NULLCHR (-6)  /* Null character encountered in string */
 
 /*
  * ASCII constants.
  */
-#define ASCII_LF (0x0a)   /* Line Feed */
-#define ASCII_CR (0x0d)   /* Carriage Return */
+#define ASCII_HT        (0x09)  /* Horizontal Tab */
+#define ASCII_LF        (0x0a)  /* Line Feed */
+#define ASCII_CR        (0x0d)  /* Carriage Return */
+#define ASCII_SP        (0x20)  /* Space */
+#define ASCII_DQUOTE    (0x22)  /* " */
+#define ASCII_POUNDSIGN (0x23)  /* # */
+#define ASCII_PERCENT   (0x25)  /* % */
+#define ASCII_LPAREN    (0x28)  /* ( */
+#define ASCII_RPAREN    (0x29)  /* ) */
+#define ASCII_COMMA     (0x2c)  /* , */
+#define ASCII_SEMICOLON (0x3b)  /* ; */
+#define ASCII_LSQR      (0x5b)  /* [ */
+#define ASCII_BACKSLASH (0x5c)  /* \ */
+#define ASCII_RSQR      (0x5d)  /* ] */
+#define ASCII_GRACCENT  (0x60)  /* ` */
+#define ASCII_LCURL     (0x7b)  /* { */
+#define ASCII_BAR       (0x7c)  /* | */
+#define ASCII_RCURL     (0x7d)  /* } */
+
+/* Visible printing characters */
+#define ASCII_VISIBLE_MIN (0x21)
+#define ASCII_VISIBLE_MAX (0x7e)
 
 /*
  * The bytes of the UTF-8 Byte Order Mark (BOM).
@@ -29,6 +52,56 @@
 #define SNFILTER_BOM_1 (0xef)
 #define SNFILTER_BOM_2 (0xbb)
 #define SNFILTER_BOM_3 (0xbf)
+
+/*
+ * Structure for storing state of Shastina string buffers.
+ * 
+ * Use the snbuffer_ functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * Pointer to the buffer.
+   * 
+   * The string data is null-terminated.
+   * 
+   * This pointer is NULL if cap is zero.
+   */
+  char *pBuf;
+  
+  /*
+   * The number of characters (not including terminating null) stored in
+   * the buffer.
+   * 
+   * This may not exceed cap.
+   */
+  long count;
+  
+  /*
+   * The current capacity of the buffer in characters.
+   * 
+   * This includes space for the terminating null.
+   * 
+   * If zero, it means that no buffer has been allocated yet.
+   */
+  long cap;
+  
+  /*
+   * The initial allocation capacity for this buffer in characters.
+   * 
+   * This must be greater than zero and no greater than maxcap.
+   */
+  long initcap;
+  
+  /*
+   * The maximum capacity for this buffer in characters.
+   * 
+   * This must be greater than or equal to initcap.  It may not exceed
+   * (LONG_MAX / 2).
+   */
+  long maxcap;
+  
+} SNBUFFER;
 
 /*
  * Structure for storing state of the Shastina input filter.
@@ -89,11 +162,278 @@ typedef struct {
 } SNFILTER;
 
 /* Function prototypes */
+static void snbuffer_init(SNBUFFER *pBuffer, long icap, long maxcap);
+static void snbuffer_reset(SNBUFFER *pBuffer, int full);
+static int snbuffer_append(SNBUFFER *pBuffer, int c);
+static char *snbuffer_get(SNBUFFER *pBuffer);
+static long snbuffer_count(SNBUFFER *pBuffer);
+
 static void snfilter_reset(SNFILTER *pFilter);
 static int snfilter_read(SNFILTER *pFilter, FILE *pIn);
 static long snfilter_count(SNFILTER *pFilter);
 static int snfilter_bomflag(SNFILTER *pFilter);
 static int snfilter_pushback(SNFILTER *pFilter);
+
+static int snchar_islegal(int c);
+static int snchar_isatomic(int c);
+static int snchar_isinclusive(int c);
+static int snchar_isexclusive(int c);
+
+static int snstr_readQuoted(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter);
+
+/*
+ * Initialize a string buffer.
+ * 
+ * String buffers must be initialized before they are used, or undefined
+ * behavior occurs.  A full reset must be performed on the string buffer
+ * using snbuffer_reset() before the structure is released or a memory
+ * leak may occur.
+ * 
+ * icap is the initial allocation capacity in characters.  maxcap is the
+ * maximum capacity for the buffer.
+ * 
+ * icap must be greater than zero, maxcap must be greater than or equal
+ * to icap, and maxcap must be no greater than (LONG_MAX / 2) or a fault
+ * will occur.
+ * 
+ * If (sizeof(size_t) < 2), this function will always fault.  Otherwise,
+ * if (sizeof(size_t) < 4), this function will fault if maxcap exceeds
+ * 65535.  Otherwise, (sizeof(size_t) >= 4) and this function will fault
+ * if maxcap exceeds 2147483647.  This is to prevent memory allocation
+ * problems.
+ * 
+ * Do not initialize a string buffer that is already initialized, or a
+ * memory leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - pointer to the buffer to initialize
+ * 
+ *   icap - the initial allocation capacity
+ * 
+ *   maxcap - the maximum allocation capacity
+ */
+static void snbuffer_init(SNBUFFER *pBuffer, long icap, long maxcap) {
+  
+  /* Check parameters */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  if ((icap <= 0) || (maxcap < icap) || (maxcap > (LONG_MAX / 2))) {
+    abort();
+  }
+  
+  if (sizeof(size_t) < 2) {
+    abort();
+  } else if (sizeof(size_t) < 4) {
+    if (maxcap > 65535L) {
+      abort();
+    }
+  } else {
+    if (maxcap > 2147483647L) {
+      abort();
+    }
+  }
+  
+  /* Initialize structure */
+  memset(pBuffer, 0, sizeof(SNBUFFER));
+  pBuffer->pBuf = NULL;
+  pBuffer->count = 0;
+  pBuffer->cap = 0;
+  pBuffer->initcap = icap;
+  pBuffer->maxcap = maxcap;
+}
+
+/*
+ * Reset a string buffer back to empty.
+ * 
+ * The string buffer must already have been initialized with
+ * snbuffer_init() or undefined behavior occurs.
+ * 
+ * full is non-zero to perform a full reset, zero to perform a fast
+ * reset.  A fast reset just clears the buffer to empty without
+ * releasing the allocated memory buffer, allowing it to be reused.  A
+ * full reset also releases the allocated memory buffer, clearing the
+ * structure all the way back to its initial state.
+ * 
+ * A full reset must be performed on all string buffers before they are
+ * released, or a memory leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the string buffer to reset
+ * 
+ *   full - non-zero for a full reset, zero for a partial reset
+ */
+static void snbuffer_reset(SNBUFFER *pBuffer, int full) {
+  
+  /* Check parameters */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  /* Set the count back to zero */
+  pBuffer->count = 0;
+  
+  /* If a buffer is allocated, clear it all to zero */
+  if (pBuffer->cap > 0) {
+    memset(pBuffer->pBuf, 0, (size_t) pBuffer->cap);
+  }
+  
+  /* If we're doing a full reset, release the buffer if allocated and
+   * reset capacity back to zero */
+  if (full && (pBuffer->cap > 0)) {
+    free(pBuffer->pBuf);
+    pBuffer->cap = 0;
+  }
+}
+
+/*
+ * Append a character to a string buffer.
+ * 
+ * The character c may be any unsigned byte value except for zero.  That
+ * is, the range is 1-255.
+ * 
+ * The function fails if there is no more capacity left for another
+ * character.  The buffer is unmodified in this case.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the string buffer to add a character to
+ * 
+ *   c - the unsigned byte value to add
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if no more capacity
+ */
+static int snbuffer_append(SNBUFFER *pBuffer, int c) {
+  
+  int status = 1;
+  long newcap = 0;
+  
+  /* Check parameters */
+  if ((pBuffer == NULL) || (c < 1) || (c > 255)) {
+    abort();
+  }
+  
+  /* Proceed only if we are not completely maxed out of capacity */
+  if (pBuffer->count < (pBuffer->maxcap - 1)) {
+    /* We have capacity left; first, make the initial allocation if we
+     * haven't allocated a memory buffer yet */
+    if (pBuffer->cap < 1) {
+      pBuffer->pBuf = (char *) malloc((size_t) pBuffer->initcap);
+      if (pBuffer->pBuf == NULL) {
+        abort();
+      }
+      memset(pBuffer->pBuf, 0, (size_t) pBuffer->initcap);
+      pBuffer->cap = pBuffer->initcap;
+    }
+    
+    /* Next, increase allocated memory buffer if we need more space */
+    if (pBuffer->count >= (pBuffer->cap - 1)) {
+      /* New capacity should usually be double current capacity */
+      newcap = pBuffer->cap * 2;
+      
+      /* If new capacity exceeds max capacity, set to max capacity */
+      if (newcap > pBuffer->maxcap) {
+        newcap = pBuffer->maxcap;
+      }
+      
+      /* Allocate new buffer */
+      pBuffer->pBuf = (char *) realloc(pBuffer->pBuf, (size_t) newcap);
+      if (pBuffer->pBuf == NULL) {
+        abort();
+      }
+      
+      /* Initialize new space to zero */
+      memset((pBuffer->pBuf + pBuffer->cap),
+              0,
+              (size_t) (newcap - pBuffer->cap));
+      
+      /* Update capacity */
+      pBuffer->cap = newcap;
+    }
+    
+    /* Add the new character */
+    (pBuffer->pBuf)[pBuffer->count] = (char) c;
+    (pBuffer->count)++;
+    
+  } else {
+    /* Out of capacity */
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Get a pointer to the current string stored in the buffer.
+ * 
+ * The string will be null-terminated.  The returned pointer remains
+ * valid until another character is appended to the buffer or the buffer
+ * is reset.
+ * 
+ * Clients should not modify the data pointed to, or undefined behavior
+ * occurs.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the string buffer to query
+ * 
+ * Return:
+ * 
+ *   the current buffered string
+ */
+static char *snbuffer_get(SNBUFFER *pBuffer) {
+  
+  /* Check parameter */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  /* If we haven't made the initial allocation yet, do it */
+  if (pBuffer->cap < 1) {
+    pBuffer->pBuf = (char *) malloc((size_t) pBuffer->initcap);
+    if (pBuffer->pBuf == NULL) {
+      abort();
+    }
+    memset(pBuffer->pBuf, 0, (size_t) pBuffer->initcap);
+    pBuffer->cap = pBuffer->initcap;
+  }
+  
+  /* Return the pointer */
+  return pBuffer->pBuf;
+}
+
+/*
+ * Return the number of characters currently buffered.
+ * 
+ * This does not include the terminating null.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to query
+ * 
+ * Return:
+ * 
+ *   the number of buffered characters
+ */
+static long snbuffer_count(SNBUFFER *pBuffer) {
+  
+  /* Check parameter */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  /* Return the count */
+  return pBuffer->count;
+}
 
 /*
  * Reset an input filter back to its original state.
@@ -430,40 +770,231 @@ static int snfilter_pushback(SNFILTER *pFilter) {
 }
 
 /*
+ * Determine whether the given character is legal, outside of string
+ * literals and comments.
+ * 
+ * This range includes all visible, printing ASCII characters, plus
+ * Space (SP), Horizontal Tab (HT), and Line Feed (LF).
+ * 
+ * Parameters:
+ * 
+ *   c - the character to check
+ * 
+ * Return:
+ * 
+ *   non-zero if legal, zero if not
+ */
+static int snchar_islegal(int c) {
+  
+  int result = 0;
+  
+  if (((c >= ASCII_VISIBLE_MIN) && (c <= ASCII_VISIBLE_MAX)) ||
+      (c == ASCII_SP) || (c == ASCII_HT) || (c == ASCII_LF)) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  return result;
+}
+
+/*
+ * Determine whether the given character is an atomic primitive
+ * character.
+ * 
+ * These characters can stand by themselves as a full token.
+ * 
+ * Parameters:
+ * 
+ *   c - the character to check
+ * 
+ * Return:
+ * 
+ *   non-zero if atomic, zero if not
+ */
+static int snchar_isatomic(int c) {
+  
+  int result = 0;
+  
+  if ((c == ASCII_LPAREN) || (c == ASCII_RPAREN) ||
+      (c == ASCII_LSQR) || (c == ASCII_RSQR) ||
+      (c == ASCII_COMMA) || (c == ASCII_PERCENT) ||
+      (c == ASCII_SEMICOLON) || (c == ASCII_DQUOTE) ||
+      (c == ASCII_GRACCENT) || (c == ASCII_LCURL) ||
+      (c == ASCII_RCURL)) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  return result;
+}
+
+/*
+ * Determine whether the given character is an inclusive token closer.
+ * 
+ * Inclusive token closers end the token and are included as the last
+ * character of the token.
+ * 
+ * Parameters:
+ * 
+ *   c - the character to check
+ * 
+ * Return:
+ * 
+ *   non-zero if inclusive, zero if not
+ */
+static int snchar_isinclusive(int c) {
+  
+  int result = 0;
+  
+  if ((c == ASCII_DQUOTE) || (c == ASCII_GRACCENT) ||
+      (c == ASCII_LCURL)) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  return result;
+}
+
+/*
+ * Determine whether the given character is an exclusive token closer.
+ * 
+ * Exclusive token closers end the token but are not included as the
+ * last character of the token.
+ * 
+ * Parameters:
+ * 
+ *   c - the character to check
+ * 
+ * Return:
+ * 
+ *   non-zero if exclusive, zero if not
+ */
+static int snchar_isexclusive(int c) {
+  
+  int result = 0;
+  
+  if ((c == ASCII_HT) || (c == ASCII_SP) || (c == ASCII_LF) ||
+      (c == ASCII_LPAREN) || (c == ASCII_RPAREN) ||
+      (c == ASCII_LSQR) || (c == ASCII_RSQR) ||
+      (c == ASCII_COMMA) || (c == ASCII_PERCENT) ||
+      (c == ASCII_SEMICOLON) || (c == ASCII_POUNDSIGN) ||
+      (c == ASCII_RCURL)) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  return result;
+}
+
+/*
+ * Read a quoted string.
+ * 
+ * pBuffer is the buffer into which the string data will be read.  It
+ * must be properly initialized.  This function will reset the buffer
+ * and then write the string data into it.
+ * 
+ * pIn is the file to read data from.  It must be open for read access.
+ * Reading is fully sequential.
+ * 
+ * pFilter is the input filter to read the data through.  It should be
+ * in the proper state.
+ * 
+ * This function assumes that the opening quote as already been read.
+ * The first character read is therefore the first character of string
+ * data.  The closing quote will be read and consumed by this function.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to read the string data into
+ * 
+ *   pIn - the input file to read the string data from
+ * 
+ * Return:
+ * 
+ *   zero if successful, or one of the SNERR constants if error
+ */
+static int snstr_readQuoted(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter) {
+  
+  int err_num = 0;
+  int esc_flag = 0;
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
+    abort();
+  }
+  
+  /* Read all string data */
+  while (!err_num) {
+    
+    /* Read a character */
+    c = snfilter_read(pFilter, pIn);
+    if (c < 0) {
+      if (c == SNERR_EOF) {
+        err_num = SNERR_OPENSTR;
+      } else {
+        err_num = c;
+      }
+    }
+    
+    /* If this character is a double quote and the escape flag is not
+     * set, then we are done so leave loop */
+    if ((!err_num) && (!esc_flag) && (c == ASCII_DQUOTE)) {
+      break;
+    }
+    
+    /* Update escape flag -- set if current character is a backslash,
+     * clear otherwise */
+    if ((!err_num) && (c == ASCII_BACKSLASH)) {
+      esc_flag = 1;
+    } else {
+      esc_flag = 0;
+    }
+    
+    /* Make sure character is not a null character */
+    if ((!err_num) && (c == 0)) {
+      err_num = SNERR_NULLCHR;
+    }
+    
+    /* Append character to buffer */
+    if (!err_num) {
+      if (!snbuffer_append(pBuffer, c)) {
+        err_num = SNERR_LONGSTR;
+      }
+    }
+  }
+  
+  /* Return okay or error code */
+  return err_num;
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
   SNFILTER fil;
-  int c = 0;
+  SNBUFFER buf;
+  int retval = 0;
   
   snfilter_reset(&fil);
+  snbuffer_init(&buf, 4, 65535);
   
-  /* (Double all lowercase letters) */
+  retval = snstr_readQuoted(&buf, stdin, &fil);
+  if (retval == 0) {
+    printf("%s\n", snbuffer_get(&buf));
+  } else {
+    fprintf(stderr, "Error %d!\n", retval);
+  }
   
-  for(c = snfilter_read(&fil, stdin);
-      c >= 0;
-      c = snfilter_read(&fil, stdin)) {
-    
-    putchar(c);
-    if ((c >= 'a') && (c <= 'z')) {
-      if (!snfilter_pushback(&fil)) {
-        abort();
-      }
-      c = snfilter_read(&fil, stdin);
-      if (c <= 0) {
-        abort();
-      }
-      putchar(c);
-    }
-  }
-  if (c == SNERR_IOERR) {
-    fprintf(stderr, "I/O error!\n");
-  } else if (c == SNERR_BADSIG) {
-    fprintf(stderr, "Bad signature!\n");
-  }
-  printf("\nLine count: %ld\n", snfilter_count(&fil));
-  printf("BOM flag  : %d\n", snfilter_bomflag(&fil));
+  snbuffer_reset(&buf, 1);
   
   return 0;
 }
