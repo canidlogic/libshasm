@@ -190,6 +190,8 @@ static int snstr_readCurlied(
     FILE     * pIn,
     SNFILTER * pFilter);
 
+static void sntk_skip(FILE *pIn, SNFILTER *pFilter);
+
 /*
  * Initialize a string buffer.
  * 
@@ -650,7 +652,7 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
     pFilter->c = err_num;
   }
   
-  /* Return the character */
+  /* Return the character or special condition */
   return (pFilter->c);
 }
 
@@ -1097,25 +1099,71 @@ static int snstr_readCurlied(
 }
 
 /*
+ * Skip over zero or more characters of whitespace and comments.
+ * 
+ * After this operation, the file and filter will be positioned at the
+ * first character that is not whitespace and not part of a comment, or
+ * at the first special or error condition that was encountered.
+ * 
+ * Parameters:
+ * 
+ *   pIn - the input file
+ * 
+ *   pFilter - the filter to pass the input through
+ */
+static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
+  
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pIn == NULL) || (pFilter == NULL)) {
+    abort();
+  }
+  
+  /* Skip over whitespace and comments */
+  while (c >= 0) {
+    
+    /* Skip over zero or more characters of whitespace */
+    for(c = snfilter_read(pFilter, pIn);
+        (c == ASCII_SP) || (c == ASCII_HT) || (c == ASCII_LF);
+        c = snfilter_read(pFilter, pIn));
+    
+    /* If we encountered anything except the pound sign, set pushback
+     * mode and leave the loop */
+    if (c != ASCII_POUNDSIGN) {
+      if (!snfilter_pushback(pFilter)) {
+        abort();  /* shouldn't happen */
+      }
+      break;
+    }
+    
+    /* We encountered the start of a comment -- read until we encounter
+     * LF or some special condition */
+    for(c = snfilter_read(pFilter, pIn);
+        (c >= 0) && (c != ASCII_LF);
+        c = snfilter_read(pFilter, pIn));
+  }
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
   SNFILTER fil;
-  SNBUFFER buf;
   int retval = 0;
   
   snfilter_reset(&fil);
-  snbuffer_init(&buf, 4, 65535);
   
-  retval = snstr_readCurlied(&buf, stdin, &fil);
-  if (retval == 0) {
-    printf("%s\n", snbuffer_get(&buf));
-  } else {
+  sntk_skip(stdin, &fil);
+  for(retval = snfilter_read(&fil, stdin);
+      retval >= 0;
+      retval = snfilter_read(&fil, stdin)) {
+    putchar(retval);
+  }
+  if (retval != SNERR_EOF) {
     fprintf(stderr, "Error %d!\n", retval);
   }
-  
-  snbuffer_reset(&buf, 1);
   
   return 0;
 }
