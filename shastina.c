@@ -20,6 +20,9 @@
 #define SNERR_LONGSTR   (-5)  /* String is too long */
 #define SNERR_NULLCHR   (-6)  /* Null character encountered in string */
 #define SNERR_DEEPCURLY (-7)  /* Too much curly nesting in string */
+#define SNERR_BADCHAR   (-8)  /* Illegal character encountered */
+#define SNERR_LONGTOKEN (-9)  /* Token is too long */
+#define SNERR_TRAILER   (-10) /* Content present after |; token */
 
 /*
  * ASCII constants.
@@ -191,6 +194,10 @@ static int snstr_readCurlied(
     SNFILTER * pFilter);
 
 static void sntk_skip(FILE *pIn, SNFILTER *pFilter);
+static int sntk_readToken(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter);
 
 /*
  * Initialize a string buffer.
@@ -1146,24 +1153,210 @@ static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
 }
 
 /*
+ * Read a token.
+ * 
+ * pBuffer is the buffer into which the token will be read.  It must be
+ * properly initialized.  This function will reset the buffer and then
+ * write the token into it.
+ * 
+ * pIn is the file to read data from.  It must be open for read access.
+ * Reading is fully sequential.
+ * 
+ * pFilter is the input filter to read the data through.  It should be
+ * in the proper state.
+ * 
+ * This function will skip over comments and whitespace before reading
+ * the token.  If the special |; token is read, this function will also
+ * read through the rest of the file, confirming that nothing except for
+ * whitespace and comments is present after the |; token.
+ * 
+ * For string tokens and embedded tokens, this function only reads the
+ * opening token and not the data that follows it.  Input will be
+ * positioned such that the next byte read will the first byte of string
+ * data or embedded data.
+ * 
+ * Note that it is not possible to use this function to iterate through
+ * all the tokens in a Shastina source file, because this function
+ * doesn't handle string data and embedded data.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to read the token into
+ * 
+ *   pIn - the input file to read the token from
+ * 
+ *   pFilter - the input filter
+ * 
+ * Return:
+ * 
+ *   zero if successful, or one of the SNERR constants if error
+ */
+static int sntk_readToken(
+    SNBUFFER * pBuffer,
+    FILE     * pIn,
+    SNFILTER * pFilter) {
+  
+  int err_num = 0;
+  int c = 0;
+  int c2 = 0;
+  int term = 0;
+  int leave = 0;
+  int omit = 0;
+  
+  /* Check parameters */
+  if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
+    abort();
+  }
+  
+  /* Reset the buffer */
+  snbuffer_reset(pBuffer, 0);
+  
+  /* Skip over whitespace and comments */
+  sntk_skip(pIn, pFilter);
+  
+  /* Read a character */
+  c = snfilter_read(pFilter, pIn);
+  if (c < 0) {
+    err_num = c;
+  }
+  
+  /* Check that the character is legal */
+  if (!err_num) {
+    if (!snchar_islegal(c)) {
+      err_num = SNERR_BADCHAR;
+    }
+  }
+  
+  /* Add the first character to the buffer */
+  if (!err_num) {
+    if (!snbuffer_append(pBuffer, c)) {
+      err_num = SNERR_LONGTOKEN;
+    }
+  }
+  
+  /* If the first character is a vertical bar, check if the second
+   * character is a semicolon, forming the |; pair; set the term flag
+   * in this case and add the semicolon to the token; else, unread the
+   * second character */
+  if ((!err_num) && (c == ASCII_BAR)) {
+    c2 = snfilter_read(pFilter, pIn);
+    if (c2 < 0) {
+      err_num = c2;
+    }
+    
+    if ((!err_num) && (c2 == ASCII_SEMICOLON)) {
+      term = 1;
+      if (!snbuffer_append(pBuffer, c2)) {
+        err_num = SNERR_LONGTOKEN;
+      }
+    } else {
+      if (!snfilter_pushback(pFilter)) {
+        abort();  /* shouldn't happen */
+      }
+    }
+  }
+  
+  /* If we just read the terminal |; token, make sure there's nothing
+   * else in the input file */
+  if ((!err_num) && term) {
+    sntk_skip(pIn, pFilter);
+    c2 = snfilter_read(pFilter, pIn);
+    if (c2 != SNERR_EOF) {
+      if (c2 >= 0) {
+        err_num = SNERR_TRAILER;
+      } else {
+        err_num = c2;
+      }
+    }
+  }
+  
+  /* If the first character read is not atomic and the term flag is not
+   * set, read additional characters into the token up to the exclusive
+   * or inclusive character that ends the token */
+  if ((!err_num) && (!term)) {
+    if (!snchar_isatomic(c)) {
+      
+      /* Read the additional characters */
+      while (!err_num) {
+        
+        /* Read another character */
+        c = snfilter_read(pFilter, pIn);
+        if (c < 0) {
+          err_num = c;
+        }
+        
+        /* Make sure the character is legal */
+        if (!err_num) {
+          if (!snchar_islegal(c)) {
+            err_num = SNERR_BADCHAR;
+          }
+        }
+        
+        /* If the character is inclusive, set the leave flag */
+        if (!err_num) {
+          if (snchar_isinclusive(c)) {
+            leave = 1;
+          }
+        }
+        
+        /* If the character is exclusive, set the leave and omit
+         * flags, and push back the character */
+        if (!err_num) {
+          if (snchar_isexclusive(c)) {
+            leave = 1;
+            omit = 1;
+            if (!snfilter_pushback(pFilter)) {
+              abort();  /* shouldn't happen */
+            }
+          }
+        }
+        
+        /* If the omit flag is not set, add the character to the
+         * token */
+        if ((!err_num) && (!omit)) {
+          if (!snbuffer_append(pBuffer, c)) {
+            err_num = SNERR_LONGTOKEN;
+          }
+        }
+        
+        /* If the leave flag is set, leave the loop */
+        if ((!err_num) && leave) {
+          break;
+        }
+      }
+    }
+  }
+  
+  /* Return okay or error number */
+  return err_num;
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
   SNFILTER fil;
+  SNBUFFER buf;
   int retval = 0;
   
   snfilter_reset(&fil);
+  snbuffer_init(&buf, 4, 1024);
   
-  sntk_skip(stdin, &fil);
-  for(retval = snfilter_read(&fil, stdin);
-      retval >= 0;
-      retval = snfilter_read(&fil, stdin)) {
-    putchar(retval);
+  for(retval = sntk_readToken(&buf, stdin, &fil);
+      retval == 0;
+      retval = sntk_readToken(&buf, stdin, &fil)) {
+    
+    printf("%s\n", snbuffer_get(&buf));
+    if (strcmp(snbuffer_get(&buf), "|;") == 0) {
+      break;
+    }
   }
-  if (retval != SNERR_EOF) {
+  if (retval != 0) {
     fprintf(stderr, "Error %d!\n", retval);
   }
+  
+  snbuffer_reset(&buf, 1);
   
   return 0;
 }
