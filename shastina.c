@@ -58,6 +58,20 @@
 #define SNFILTER_BOM_3 (0xbf)
 
 /*
+ * The types of tokens.
+ */
+#define SNTOKEN_FINAL  (0)  /* The final |; token */
+#define SNTOKEN_SIMPLE (1)  /* Simple tokens, except |; */
+#define SNTOKEN_STRING (2)  /* Quoted and curly string tokens */
+#define SNTOKEN_EMBED  (3)  /* Embedded tokens */
+
+/*
+ * The types of strings.
+ */
+#define SNSTRING_QUOTED (1) /* Double-quoted strings */
+#define SNSTRING_CURLY  (2) /* Curly-bracketed strings */
+
+/*
  * Structure for storing state of Shastina string buffers.
  * 
  * Use the snbuffer_ functions to manipulate this structure.
@@ -165,12 +179,68 @@ typedef struct {
   
 } SNFILTER;
 
+/*
+ * Structure for a token read from a Shastina source file.
+ * 
+ * This covers everything that can be found in a Shastina source file,
+ * except for embedded data.
+ */
+typedef struct {
+  
+  /*
+   * The status of a token structure.
+   * 
+   * This is either one of the SNTOKEN_ constants, or it is negative,
+   * indicating an SNERR_ error.
+   */
+  int status;
+  
+  /*
+   * The string type flag.
+   * 
+   * For STRING token types, this will be set to one of the SNSTRING_
+   * constants to indicate the string type.  Otherwise, it should be
+   * ignored.
+   */
+  int str_type;
+  
+  /*
+   * Pointer to the key buffer.
+   * 
+   * This will always be reset on read operations.  For SIMPLE and FINAL
+   * token types, this buffer will contain the full token on return.
+   * For STRING and EMBED token types, this buffer will contain the
+   * prefix (excluding the opening quote, bracket, or accent) on return.
+   * 
+   * The state of the buffer is undefined on error status returns.
+   * 
+   * The key and value buffer may not point to the same object.
+   */
+  SNBUFFER *pKey;
+  
+  /*
+   * Pointer to the value buffer.
+   * 
+   * This will always be reset on read operations.  For STRING token
+   * types, this buffer will contain the string data on return.  For
+   * other token types, this buffer will be empty on return.
+   * 
+   * The state of the buffer is undefined on error status returns.
+   * 
+   * The key and value buffer may not point to the same object.
+   */
+  SNBUFFER *pValue;
+  
+} SNTOKEN;
+
 /* Function prototypes */
 static void snbuffer_init(SNBUFFER *pBuffer, long icap, long maxcap);
 static void snbuffer_reset(SNBUFFER *pBuffer, int full);
 static int snbuffer_append(SNBUFFER *pBuffer, int c);
 static char *snbuffer_get(SNBUFFER *pBuffer);
 static long snbuffer_count(SNBUFFER *pBuffer);
+static int snbuffer_last(SNBUFFER *pBuffer);
+static int snbuffer_less(SNBUFFER *pBuffer);
 
 static void snfilter_reset(SNFILTER *pFilter);
 static int snfilter_read(SNFILTER *pFilter, FILE *pIn);
@@ -198,6 +268,8 @@ static int sntk_readToken(
     SNBUFFER * pBuffer,
     FILE     * pIn,
     SNFILTER * pFilter);
+
+static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil);
 
 /*
  * Initialize a string buffer.
@@ -448,6 +520,72 @@ static long snbuffer_count(SNBUFFER *pBuffer) {
   
   /* Return the count */
   return pBuffer->count;
+}
+
+/*
+ * Get the last character of a buffer.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to query
+ * 
+ * Return:
+ * 
+ *   the last character, or zero if the buffer is empty
+ */
+static int snbuffer_last(SNBUFFER *pBuffer) {
+  
+  int c = 0;
+  
+  /* Check parameter */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  /* Get last character if buffer not empty */
+  if (pBuffer->count > 0) {
+    c = pBuffer->pBuf[pBuffer->count - 1];
+  }
+  
+  /* Return character or zero */
+  return c;
+}
+
+/*
+ * Remove the last character from the given buffer.
+ * 
+ * The function fails if the buffer is empty.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the buffer to remove a character from
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if buffer already empty
+ */
+static int snbuffer_less(SNBUFFER *pBuffer) {
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  
+  /* Only proceed if not empty */
+  if (pBuffer->count > 0) {
+    /* Remove a character from the buffer */
+    pBuffer->pBuf[pBuffer->count - 1] = (char) 0;
+    (pBuffer->count)--;
+    
+  } else {
+    /* Buffer was empty */
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -1332,23 +1470,174 @@ static int sntk_readToken(
 }
 
 /*
+ * Read a complete token from the given file.
+ * 
+ * pToken is the structure to receive the read token.  Only the pKey and
+ * pValue fields need to be filled in upon entry.  Upon return, all 
+ * fields will be filled in.  See the structure documentation for
+ * further information.
+ * 
+ * pIn is the file to read data from.  It must be open for read access.
+ * Reading is fully sequential.
+ * 
+ * pFilter is the input filter to read the data through.  It should be
+ * in the proper state.
+ * 
+ * This function differs from sntk_readToken() in that this function can
+ * also read string data.  The only thing that this function is unable
+ * to read is embedded data.
+ * 
+ * For embedded tokens, input will be positioned such that the next byte
+ * read will be the first byte of embedded data.
+ * 
+ * Parameters:
+ * 
+ *   pToken - the token structure
+ * 
+ *   pIn - the input file
+ * 
+ *   pFil - the filter to pass input through
+ */
+static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
+  
+  int err_num = 0;
+  int c = 0;
+  
+  /* Check parameters */
+  if ((pToken == NULL) || (pIn == NULL) || (pFil == NULL)) {
+    abort();
+  }
+  if ((pToken->pKey == NULL) || (pToken->pValue == NULL) ||
+      (pToken->pKey == pToken->pValue)) {
+    abort();
+  }
+  
+  /* Reset both buffers and the token fields */
+  snbuffer_reset(pToken->pKey, 0);
+  snbuffer_reset(pToken->pValue, 0);
+  pToken->status = 0;
+  pToken->str_type = 0;
+  
+  /* Read a token into the key buffer */
+  err_num = sntk_readToken(pToken->pKey, pIn, pFil);
+  
+  /* Identify the token by its last character, also setting the str_type
+   * flag for string tokens */
+  if (!err_num) {
+    /* Get last character */
+    c = snbuffer_last(pToken->pKey);
+    
+    /* Identify token */
+    if (c == ASCII_DQUOTE) {
+      pToken->status = SNTOKEN_STRING;
+      pToken->str_type = SNSTRING_QUOTED;
+    
+    } else if (c == ASCII_LCURL) {
+      pToken->status = SNTOKEN_STRING;
+      pToken->str_type = SNSTRING_CURLY;
+    
+    } else if (c == ASCII_GRACCENT) {
+      pToken->status = SNTOKEN_EMBED;
+    
+    } else {
+      pToken->status = SNTOKEN_SIMPLE;
+    }
+  }
+  
+  /* For simple tokens, distinguish between SIMPLE and FINAL */
+  if ((!err_num) && (pToken->status == SNTOKEN_SIMPLE)) {
+    if (strcmp(snbuffer_get(pToken->pKey), "|;") == 0) {
+      pToken->status = SNTOKEN_FINAL;
+    }
+  }
+  
+  /* For string and embedded tokens, remove the last character, so the
+   * key buffer only has the prefix */
+  if ((!err_num) && ((pToken->status == SNTOKEN_STRING) ||
+                      (pToken->status == SNTOKEN_EMBED))) {
+    if (!snbuffer_less(pToken->pKey)) {
+      abort();  /* shouldn't happen */
+    }
+  }
+  
+  /* For string tokens, read the string data into the value buffer */
+  if ((!err_num) && (pToken->status == SNTOKEN_STRING)) {
+    if (pToken->str_type == SNSTRING_QUOTED) {
+      /* Quoted string */
+      err_num = snstr_readQuoted(pToken->pValue, pIn, pFil);
+      
+    } else if (pToken->str_type == SNSTRING_CURLY) {
+      /* Curly string */
+      err_num = snstr_readCurlied(pToken->pValue, pIn, pFil);
+      
+    } else {
+      /* Unknown string type */
+      abort();
+    }
+  }
+  
+  /* If an error was encountered, clear the buffers and the fields, and
+   * set the status to the error */
+  if (err_num) {
+    snbuffer_reset(pToken->pKey, 0);
+    snbuffer_reset(pToken->pValue, 0);
+    pToken->str_type = 0;
+    pToken->status = err_num;
+  }
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
   SNFILTER fil;
-  SNBUFFER buf;
+  SNBUFFER buf_key;
+  SNBUFFER buf_val;
+  SNTOKEN tk;
   int retval = 0;
   
   snfilter_reset(&fil);
-  snbuffer_init(&buf, 4, 1024);
+  snbuffer_init(&buf_key, 4, 1024);
+  snbuffer_init(&buf_val, 32, 65535);
+  memset(&tk, 0, sizeof(SNTOKEN));
+  tk.pKey = &buf_key;
+  tk.pValue = &buf_val;
   
-  for(retval = sntk_readToken(&buf, stdin, &fil);
-      retval == 0;
-      retval = sntk_readToken(&buf, stdin, &fil)) {
+  for(sntoken_read(&tk, stdin, &fil);
+      tk.status >= 0;
+      sntoken_read(&tk, stdin, &fil)) {
     
-    printf("%s\n", snbuffer_get(&buf));
-    if (strcmp(snbuffer_get(&buf), "|;") == 0) {
+    if (tk.status == SNTOKEN_SIMPLE) {
+      printf("%s\n", snbuffer_get(tk.pKey));
+    
+    } else if (tk.status == SNTOKEN_STRING) {
+      if (tk.str_type == SNSTRING_QUOTED) {
+        printf("(%s) \"%s\"\n",
+            snbuffer_get(tk.pKey),
+            snbuffer_get(tk.pValue));
+      
+      } else if (tk.str_type == SNSTRING_CURLY) {
+        printf("(%s) {%s}\n",
+            snbuffer_get(tk.pKey),
+            snbuffer_get(tk.pValue));
+      } else {
+        /* Unrecognized string type */
+        abort();
+      }
+      
+    } else if (tk.status == SNTOKEN_EMBED) {
+      printf("(%s) <<EMBED>>\n", snbuffer_get(tk.pKey));
+      
+    } else if (tk.status == SNTOKEN_FINAL) {
+      printf("End Of File\n");
+      
+    } else {
+      /* Unrecognized token type */
+      abort();
+    }
+    
+    if (tk.status == SNTOKEN_FINAL) {
       break;
     }
   }
@@ -1356,7 +1645,8 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Error %d!\n", retval);
   }
   
-  snbuffer_reset(&buf, 1);
+  snbuffer_reset(&buf_key, 1);
+  snbuffer_reset(&buf_val, 1);
   
   return 0;
 }
