@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* @@TODO: replace string constants with ASCII constants */
+
 /* 
  * Error constants.
  * 
@@ -23,6 +25,17 @@
 #define SNERR_BADCHAR   (-8)  /* Illegal character encountered */
 #define SNERR_LONGTOKEN (-9)  /* Token is too long */
 #define SNERR_TRAILER   (-10) /* Content present after |; token */
+#define SNERR_DEEPARRAY (-11) /* Too much array nesting */
+#define SNERR_METANEST  (-12) /* Nested metacommands */
+#define SNERR_SEMICOLON (-13) /* Semicolon outside of metacommand */
+#define SNERR_DEEPGROUP (-14) /* Too much group nesting */
+#define SNERR_RPAREN    (-15) /* Right parenthesis outside of group */
+#define SNERR_RSQR      (-16) /* Right square bracket outside array */
+#define SNERR_OPENGROUP (-17) /* Open group */
+#define SNERR_LONGARRAY (-18) /* Array has too many elements */
+#define SNERR_METAEMBED (-19) /* Embedded data in metacommand */
+#define SNERR_OPENMETA  (-20) /* Unclosed metacommand */
+#define SNERR_OPENARRAY (-21) /* Unclosed array */
 
 /*
  * ASCII constants.
@@ -36,8 +49,16 @@
 #define ASCII_PERCENT   (0x25)  /* % */
 #define ASCII_LPAREN    (0x28)  /* ( */
 #define ASCII_RPAREN    (0x29)  /* ) */
+#define ASCII_PLUS      (0x2b)  /* + */
 #define ASCII_COMMA     (0x2c)  /* , */
+#define ASCII_HYPHEN    (0x2d)  /* - */
+#define ASCII_ZERO      (0x30)  /* 0 */
+#define ASCII_NINE      (0x39)  /* 9 */
+#define ASCII_COLON     (0x3a)  /* : */
 #define ASCII_SEMICOLON (0x3b)  /* ; */
+#define ASCII_EQUALS    (0x3d)  /* = */
+#define ASCII_QUESTION  (0x3f)  /* ? */
+#define ASCII_ATSIGN    (0x40)  /* @ */
 #define ASCII_LSQR      (0x5b)  /* [ */
 #define ASCII_BACKSLASH (0x5c)  /* \ */
 #define ASCII_RSQR      (0x5d)  /* ] */
@@ -70,6 +91,90 @@
  */
 #define SNSTRING_QUOTED (1) /* Double-quoted strings */
 #define SNSTRING_CURLY  (2) /* Curly-bracketed strings */
+
+/*
+ * The types of entities.
+ */
+#define SNENTITY_EOF          (0)   /* End Of File */
+#define SNENTITY_STRING       (1)   /* String literal */
+#define SNENTITY_EMBEDDED     (2)   /* Embedded data */
+#define SNENTITY_BEGIN_META   (3)   /* Begin metacommand */
+#define SNENTITY_END_META     (4)   /* End metacommand */
+#define SNENTITY_META_TOKEN   (5)   /* Metacommand token */
+#define SNENTITY_META_STRING  (6)   /* Metacommand string */
+#define SNENTITY_NUMERIC      (7)   /* Numeric literal */
+#define SNENTITY_VARIABLE     (8)   /* Declare variable */
+#define SNENTITY_CONSTANT     (9)   /* Declare constant */
+#define SNENTITY_ASSIGN       (10)  /* Assign value of variable */
+#define SNENTITY_GET          (11)  /* Get variable or constant */
+#define SNENTITY_BEGIN_GROUP  (12)  /* Begin group */
+#define SNENTITY_END_GROUP    (13)  /* End group */
+#define SNENTITY_ARRAY        (14)  /* Define array */
+#define SNENTITY_OPERATION    (15)  /* Operation */
+
+/*
+ * The maximum number of queued entities.
+ * 
+ * This has nothing to do with the total number of entities in a source
+ * file.  Rather, it means no more than this many entities can result
+ * from processing a single token.
+ */
+#define SNREADER_MAXQUEUE (8)
+
+/* @@TODO: */
+#define SNREADER_KEY_INIT (16)
+#define SNREADER_KEY_MAX  (65535)
+#define SNREADER_VAL_INIT (256)
+#define SNREADER_VAL_MAX  (65535)
+#define SNREADER_ARRAY_INIT (8)
+#define SNREADER_ARRAY_MAX (1024)
+#define SNREADER_GROUP_INIT (8)
+#define SNREADER_GROUP_MAX (1024)
+
+/*
+ * Structure for storing state of Shastina numeric stacks.
+ * 
+ * Use the snstack_ functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * Pointer to the buffer.
+   * 
+   * This pointer is NULL if cap is zero.
+   */
+  long *pBuf;
+  
+  /*
+   * The number of longs stored in the buffer.
+   * 
+   * This may not exceed cap.
+   */
+  long count;
+  
+  /*
+   * The current capacity of the buffer in longs.
+   * 
+   * If zero, it means that no buffer has been allocated yet.
+   */
+  long cap;
+  
+  /*
+   * The initial allocation capacity for this buffer in longs.
+   * 
+   * This must be greater than zero and no greater than maxcap.
+   */
+  long initcap;
+  
+  /*
+   * The maximum capacity for this buffer in longs.
+   * 
+   * This must be greater than or equal to initcap.  It may not exceed
+   * (LONG_MAX / 2).
+   */
+  long maxcap;
+  
+} SNSTACK;
 
 /*
  * Structure for storing state of Shastina string buffers.
@@ -233,7 +338,185 @@ typedef struct {
   
 } SNTOKEN;
 
+/*
+ * Structure for an entity read from a Shastina source file.
+ */
+typedef struct {
+  
+  /*
+   * The status of the entity.
+   * 
+   * If this is zero or greater, it is one of the SNENTITY_ constants,
+   * defining the kind of entity this is.
+   * 
+   * If this is negative, it is one of the SNERR_ constants, defining an
+   * error condition.
+   */
+  int status;
+  
+  /*
+   * Pointer to the null-terminated key string.
+   * 
+   * For OPERATION entities, this is the name of the operation.
+   * 
+   * For VARIABLE, CONSTANT, ASSIGN, and GET entities, this is the name
+   * of the constant or variable.
+   * 
+   * For META_TOKEN entities, this is the token value.
+   * 
+   * For NUMERIC entities, this is the numeric value represented as a
+   * string.  It is up to the clients to parse this as a number.
+   * 
+   * For EMBEDDED entities, this is the embedded data prefix, which does
+   * not include the opening grave accent.
+   * 
+   * For STRING and META_STRING entities, this is the string prefix,
+   * which does not include the opening quote or curly bracket.
+   * 
+   * For all other entities, this is set to NULL and ignored.
+   * 
+   * The pointer is valid until the next entity is read or the entity
+   * reader is reset (whichever occurs first).  The client should not
+   * modify the data at the pointer.
+   */
+  char *pKey;
+  
+  /*
+   * Pointer to the null-terminated value string.
+   * 
+   * For STRING and META_STRING entities, this is the actual string
+   * data, which does not include the opening and closing quotes or
+   * brackets.
+   * 
+   * For all other entities, this is set to NULL and ignored.
+   * 
+   * The pointer is valid until the next entity is read or the entity
+   * reader is reset (whichever occurs first).  The client should not
+   * modify the data at the pointer.
+   */
+  char *pValue;
+  
+  /*
+   * The string type.
+   * 
+   * For STRING and META_STRING entities, this is one of the SNSTRING_
+   * constants, which defines whether the string is a quoted string or a
+   * curly-bracket string.
+   * 
+   * For all other entities, this is set to zero and ignored.
+   */
+  int str_type;
+  
+  /*
+   * The count value.
+   * 
+   * For ARRAY entities, this is the count of the number of array
+   * elements.  Its range is zero up to and including LONG_MAX.
+   * 
+   * For all other entities, this is set to zero and ignored.
+   */
+  long count;
+  
+} SNENTITY;
+
+/*
+ * Structure for storing state of the Shastina source file reader.
+ * 
+ * Use the snreader_ functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The status of the reader.
+   * 
+   * This is normally zero.  If negative, it is one of the SNERR_
+   * constants, indicating that an error has occurred.
+   */
+  int status;
+  
+  /*
+   * The queue of entities.
+   * 
+   * The queue_count field determines how many entities are queued.
+   * 
+   * CAUTION:  Do not queue more than one entity that makes use of the
+   * string buffers, or there will be dangling pointers!
+   */
+  SNENTITY queue[SNREADER_MAXQUEUE];
+  
+  /*
+   * The number of queued entities.
+   * 
+   * This has range zero up to SNREADER_MAXQUEUE.
+   */
+  int queue_count;
+
+  /*
+   * The number of queued entities that have been read.
+   *
+   * This has range zero up to (queue_count - 1), except when
+   * queue_count is zero, in which case queue_read is also zero.
+   */
+  int queue_read;
+
+  /*
+   * The buffer for key strings.
+   * 
+   * This needs to be properly initialized.  It also needs to be fully
+   * reset before the structure is released.
+   */
+  SNBUFFER buf_key;
+  
+  /*
+   * The buffer for value strings.
+   * 
+   * This needs to be properly initialized.  It also needs to be fully
+   * reset before the structure is released.
+   */
+  SNBUFFER buf_value;
+  
+  /*
+   * The array stack.
+   * 
+   * This needs to be properly initialized.  It also needs to be fully
+   * reset before the structure is released.
+   */
+  SNSTACK stack_array;
+  
+  /*
+   * The group stack.
+   * 
+   * This needs to be properly initialized.  It also needs to be fully
+   * reset before the structure is released.
+   */
+  SNSTACK stack_group;
+  
+  /*
+   * The metacommand flag.
+   * 
+   * This is non-zero if currently in a metacommand, zero otherwise.
+   */
+  int meta_flag;
+  
+  /*
+   * The array flag.
+   * 
+   * This is non-zero if a new array was just opened, zero otherwise.
+   */
+  int array_flag;
+  
+} SNREADER;
+
 /* Function prototypes */
+static void snstack_init(SNSTACK *pStack, long icap, long maxcap);
+static void snstack_reset(SNSTACK *pStack, int full);
+static int snstack_push(SNSTACK *pStack, long v);
+static long snstack_pop(SNSTACK *pStack);
+static long snstack_peek(SNSTACK *pStack);
+static int snstack_inc(SNSTACK *pStack);
+static int snstack_dec(SNSTACK *pStack);
+static long snstack_count(SNSTACK *pStack);
+
 static void snbuffer_init(SNBUFFER *pBuffer, long icap, long maxcap);
 static void snbuffer_reset(SNBUFFER *pBuffer, int full);
 static int snbuffer_append(SNBUFFER *pBuffer, int c);
@@ -270,6 +553,403 @@ static int sntk_readToken(
     SNFILTER * pFilter);
 
 static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil);
+
+static void snreader_init(SNREADER *pReader);
+static void snreader_reset(SNREADER *pReader, int full);
+static void snreader_read(
+    SNREADER * pReader,
+    SNENTITY * pEntity,
+    FILE     * pIn,
+    SNFILTER * pFilter);
+
+static void snreader_addEntityZ(SNREADER *pReader, int entity);
+static void snreader_addEntityS(
+    SNREADER * pReader,
+    int        entity,
+    char     * s);
+static void snreader_addEntityL(
+    SNREADER * pReader,
+    int        entity,
+    long       l);
+static void snreader_addEntityT(
+    SNREADER * pReader,
+    int        entity,
+    char     * pPrefix,
+    int        str_type,
+    char     * pData);
+
+static void snreader_arrayPrefix(SNREADER *pReader);
+static void snreader_fill(
+    SNREADER * pReader,
+    FILE     * pIn,
+    SNFILTER * pFilter);
+
+/*
+ * Initialize a long stack.
+ * 
+ * Stacks must be initialized before they are used, or undefined 
+ * behavior occurs.  A full reset must be performed on the stack using
+ * snstack_reset() before the structure is released or a memory leak may
+ * occur.
+ * 
+ * icap is the initial allocation capacity in longs.  maxcap is the 
+ * maximum capacity for the buffer (in longs).
+ * 
+ * icap must be greater than zero, maxcap must be greater than or equal
+ * to icap, and maxcap must be no greater than (LONG_MAX / 2) or a fault
+ * will occur.
+ * 
+ * If (sizeof(size_t) < 2), this function will always fault.  Otherwise,
+ * if (sizeof(size_t) < 4), this function will fault if maxcap
+ * multiplied by sizeof(long) exceeds 65535.  Otherwise, it must be that
+ * (sizeof(size_t) >= 4) and this function will fault if maxcap times
+ * sizeof(long) exceeds 2147483647.  This is to prevent memory
+ * allocation problems.
+ * 
+ * Do not initialize a stack that is already initialized, or a memory
+ * leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - pointer to the stack to initialize
+ * 
+ *   icap - the initial allocation capacity in longs
+ * 
+ *   maxcap - the maximum allocation capacity in longs
+ */
+static void snstack_init(SNSTACK *pStack, long icap, long maxcap) {
+  
+  /* Check parameters */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  if ((icap <= 0) || (maxcap < icap) || (maxcap > (LONG_MAX / 2))) {
+    abort();
+  }
+  
+  if (sizeof(size_t) < 2) {
+    abort();
+  } else if (sizeof(size_t) < 4) {
+    if (maxcap > (65535L / sizeof(long))) {
+      abort();
+    }
+  } else {
+    if (maxcap > (2147483647L / sizeof(long))) {
+      abort();
+    }
+  }
+  
+  /* Initialize structure */
+  memset(pStack, 0, sizeof(SNSTACK));
+  pStack->pBuf = NULL;
+  pStack->count = 0;
+  pStack->cap = 0;
+  pStack->initcap = icap;
+  pStack->maxcap = maxcap;
+}
+
+/*
+ * Reset a stack back to empty.
+ * 
+ * The stack must already have been initialized with snstack_init() or
+ * undefined behavior occurs.
+ * 
+ * full is non-zero to perform a full reset, zero to perform a fast
+ * reset.  A fast reset just clears the buffer to empty without
+ * releasing the allocated memory buffer, allowing it to be reused.  A
+ * full reset also releases the allocated memory buffer, clearing the
+ * structure all the way back to its initial state.
+ * 
+ * A full reset must be performed on all stacks before they are 
+ * released, or a memory leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack to reset
+ * 
+ *   full - non-zero for a full reset, zero for a partial reset
+ */
+static void snstack_reset(SNSTACK *pStack, int full) {
+  
+  /* Check parameters */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Set the count back to zero */
+  pStack->count = 0;
+  
+  /* If a buffer is allocated, clear it all to zero */
+  if (pStack->cap > 0) {
+    memset(pStack->pBuf, 0, (size_t) (pStack->cap * sizeof(long)));
+  }
+  
+  /* If we're doing a full reset, release the buffer if allocated and
+   * reset capacity back to zero */
+  if (full && (pStack->cap > 0)) {
+    free(pStack->pBuf);
+    pStack->pBuf = NULL;
+    pStack->cap = 0;
+  }
+}
+
+/*
+ * Push a long on top of a stack.
+ * 
+ * The long value v may have any value.
+ * 
+ * The function fails if there is no more capacity left for another
+ * long.  The buffer is unmodified in this case.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack to push a long onto
+ * 
+ *   v - the long value to push
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if no more capacity
+ */
+static int snstack_push(SNSTACK *pStack, long v) {
+  
+  int status = 1;
+  long newcap = 0;
+  
+  /* Check parameters */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Proceed only if we are not completely maxed out of capacity */
+  if (pStack->count < pStack->maxcap) {
+    /* We have capacity left; first, make the initial allocation if we
+     * haven't allocated a memory buffer yet */
+    if (pStack->cap < 1) {
+      pStack->pBuf = (long *) malloc(
+                        (size_t) (pStack->initcap * sizeof(long)));
+      if (pStack->pBuf == NULL) {
+        abort();
+      }
+      memset(pStack->pBuf, 0,
+        (size_t) (pStack->initcap * sizeof(long)));
+      pStack->cap = pStack->initcap;
+    }
+    
+    /* Next, increase allocated memory buffer if we need more space */
+    if (pStack->count >= pStack->cap) {
+      /* New capacity should usually be double current capacity */
+      newcap = pStack->cap * 2;
+      
+      /* If new capacity exceeds max capacity, set to max capacity */
+      if (newcap > pStack->maxcap) {
+        newcap = pStack->maxcap;
+      }
+      
+      /* Allocate new buffer */
+      pStack->pBuf = (long *) realloc(pStack->pBuf,
+                                (size_t) (newcap * sizeof(long)));
+      if (pStack->pBuf == NULL) {
+        abort();
+      }
+      
+      /* Initialize new space to zero */
+      memset((void *) (pStack->pBuf + pStack->cap),
+              0,
+              (size_t) ((newcap - pStack->cap) * sizeof(long)));
+      
+      /* Update capacity */
+      pStack->cap = newcap;
+    }
+    
+    /* Append the new long */
+    (pStack->pBuf)[pStack->count] = v;
+    (pStack->count)++;
+    
+  } else {
+    /* Out of capacity */
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Pop a long value off the top of a stack.
+ * 
+ * pStack is the stack object to a pop a value off of.  It must be
+ * properly initialized.  It must not be empty, or a fault will occur.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack
+ * 
+ * Return:
+ * 
+ *   the popped long value
+ */
+static long snstack_pop(SNSTACK *pStack) {
+  
+  long v = 0;
+  
+  /* Check parameter */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Check state */
+  if (pStack->count < 1) {
+    abort();
+  }
+  
+  /* Get the top of the stack */
+  v = pStack->pBuf[pStack->count - 1];
+  
+  /* Take the top element off the stack */
+  (pStack->count)--;
+  
+  /* Return the removed value */
+  return v;
+}
+
+/*
+ * Peek at the long value on top of a stack without removing it.
+ * 
+ * pStack is the stack object to peek at.  It must be properly
+ * initialized.  It must not be empty, or a fault will occur.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack
+ * 
+ * Return:
+ * 
+ *   the peeked long value
+ */
+static long snstack_peek(SNSTACK *pStack) {
+  
+  /* Check parameter */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Check state */
+  if (pStack->count < 1) {
+    abort();
+  }
+  
+  /* Return the top of the stack */
+  return pStack->pBuf[pStack->count - 1];
+}
+
+/*
+ * Increment the long value on top of a stack.
+ * 
+ * pStack is the stack object.  It must be properly initialized.  It
+ * must not be empty, or a fault will occur.
+ * 
+ * The function fails if the top of the stack has value LONG_MAX.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if long value already at maximum
+ */
+static int snstack_inc(SNSTACK *pStack) {
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Check state */
+  if (pStack->count < 1) {
+    abort();
+  }
+  
+  /* Increment if possible */
+  if (pStack->pBuf[pStack->count - 1] < LONG_MAX) {
+    (pStack->pBuf[pStack->count - 1])++;
+  } else {
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Decrement the long value on top of a stack.
+ * 
+ * pStack is the stack object.  It must be properly initialized.  It
+ * must not be empty, or a fault will occur.
+ * 
+ * The function fails if the top of the stack has already has value less
+ * than one.
+ * 
+ * Note that this function will not decrement into negative range.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if long value already less than one
+ */
+static int snstack_dec(SNSTACK *pStack) {
+  
+  int status = 1;
+  
+  /* Check parameter */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Check state */
+  if (pStack->count < 1) {
+    abort();
+  }
+  
+  /* Decrement if possible */
+  if (pStack->pBuf[pStack->count - 1] > 0) {
+    (pStack->pBuf[pStack->count - 1])--;
+  } else {
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
+ * Get the number of elements on a given stack.
+ * 
+ * Parameters:
+ * 
+ *   pStack - the stack to query
+ * 
+ * Return:
+ * 
+ *   the number of elements on the stack
+ */
+static long snstack_count(SNSTACK *pStack) {
+  
+  /* Check parameter */
+  if (pStack == NULL) {
+    abort();
+  }
+  
+  /* Return count */
+  return (pStack->count);
+}
 
 /*
  * Initialize a string buffer.
@@ -375,6 +1055,7 @@ static void snbuffer_reset(SNBUFFER *pBuffer, int full) {
    * reset capacity back to zero */
   if (full && (pBuffer->cap > 0)) {
     free(pBuffer->pBuf);
+    pBuffer->pBuf = NULL;
     pBuffer->cap = 0;
   }
 }
@@ -1586,67 +2267,630 @@ static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
   }
 }
 
+/* @@TODO: */
+
+static void snreader_init(SNREADER *pReader) {
+  
+  /* Check parameter */
+  if (pReader == NULL) {
+    abort();
+  }
+  
+  /* Initialize */
+  memset(pReader, 0, sizeof(SNREADER));
+  
+  pReader->status = 0;
+  pReader->queue_count = 0;
+  pReader->queue_read = 0;
+  
+  snbuffer_init(&(pReader->buf_key),
+    SNREADER_KEY_INIT, SNREADER_KEY_MAX);
+  snbuffer_init(&(pReader->buf_value),
+    SNREADER_VAL_INIT, SNREADER_VAL_MAX);
+  
+  snstack_init(&(pReader->stack_array),
+    SNREADER_ARRAY_INIT, SNREADER_ARRAY_MAX);
+  snstack_init(&(pReader->stack_group),
+    SNREADER_GROUP_INIT, SNREADER_GROUP_MAX);
+  
+  pReader->meta_flag = 0;
+  pReader->array_flag = 0;
+}
+
+static void snreader_reset(SNREADER *pReader, int full) {
+  
+  /* Check parameters */
+  if (pReader == NULL) {
+    abort();
+  }
+  
+  /* Reset buffers and stacks */
+  snbuffer_reset(&(pReader->buf_key), full);
+  snbuffer_reset(&(pReader->buf_value), full);
+  
+  snstack_reset(&(pReader->stack_array), full);
+  snstack_reset(&(pReader->stack_group), full);
+  
+  /* Reset fields */
+  pReader->status = 0;
+  pReader->queue_count = 0;
+  pReader->queue_read = 0;
+  
+  pReader->meta_flag = 0;
+  pReader->array_flag = 0;
+}
+
+static void snreader_read(
+    SNREADER * pReader,
+    SNENTITY * pEntity,
+    FILE     * pIn,
+    SNFILTER * pFilter) {
+  
+  int err_code = 0;
+  
+  /* Check parameters */
+  if ((pReader == NULL) || (pEntity == NULL) || (pIn == NULL) ||
+      (pFilter == NULL)) {
+    abort();
+  }
+  
+  /* Fail immediately if reader is in error state */
+  err_code = pReader->status;
+  
+  /* If queue is empty, fill it until something is in it */
+  while ((!err_code) && (pReader->queue_count < 1)) {
+    snreader_fill(pReader, pIn, pFilter);
+    err_code = pReader->status;
+  }
+  
+  /* Return either an entity or an error code */
+  if (!err_code) {
+    /* Copy current entity to provided entity */
+    memcpy(pEntity, &(pReader->queue[pReader->queue_read]),
+            sizeof(SNENTITY));
+    
+    /* If current entity is not EOF, then remove it from queue */
+    if ((pReader->queue[pReader->queue_read]).status !=
+          SNENTITY_EOF) {
+      
+      (pReader->queue_read)++;
+      if (pReader->queue_read >= pReader->queue_count) {
+        pReader->queue_count = 0;
+        pReader->queue_read = 0;
+      }
+    }
+    
+  } else {
+    /* Error status -- write into the entity */
+    pEntity->status = err_code;
+  }
+}
+
+static void snreader_addEntityZ(SNREADER *pReader, int entity) {
+  
+  SNENTITY *pe = NULL;
+  
+  /* Check parameters */
+  if (pReader == NULL) {
+    abort();
+  }
+  if ((entity != SNENTITY_EOF) &&
+      (entity != SNENTITY_BEGIN_META) &&
+      (entity != SNENTITY_END_META) &&
+      (entity != SNENTITY_BEGIN_GROUP) &&
+      (entity != SNENTITY_END_GROUP)) {
+    abort();
+  }
+  
+  /* Proceed only if reader not in error state */
+  if (!(pReader->status)) {
+    /* Make sure room for another entity */
+    if (pReader->queue_count >= SNREADER_MAXQUEUE) {
+      abort();
+    }
+    
+    /* Get entity pointer */
+    pe = &(pReader->queue[pReader->queue_count]);
+    
+    /* Fill in entity */
+    pe->status = entity;
+    
+    /* Increase the entity count */
+    (pReader->queue_count)++;
+  }
+}
+
+static void snreader_addEntityS(
+    SNREADER * pReader,
+    int        entity,
+    char     * s) {
+  
+  SNENTITY *pe = NULL;
+  
+  /* Check parameters */
+  if ((pReader == NULL) || (s == NULL)) {
+    abort();
+  }
+  if ((entity != SNENTITY_EMBEDDED) &&
+      (entity != SNENTITY_META_TOKEN) &&
+      (entity != SNENTITY_NUMERIC) &&
+      (entity != SNENTITY_VARIABLE) &&
+      (entity != SNENTITY_CONSTANT) &&
+      (entity != SNENTITY_ASSIGN) &&
+      (entity != SNENTITY_GET) &&
+      (entity != SNENTITY_OPERATION)) {
+    abort();
+  }
+      
+  /* Proceed only if reader not in error state */
+  if (!(pReader->status)) {
+    /* Make sure room for another entity */
+    if (pReader->queue_count >= SNREADER_MAXQUEUE) {
+      abort();
+    }
+    
+    /* Get entity pointer */
+    pe = &(pReader->queue[pReader->queue_count]);
+    
+    /* Fill in entity */
+    pe->status = entity;
+    pe->pKey = s;
+    
+    /* Increase the entity count */
+    (pReader->queue_count)++;
+  }
+}
+
+static void snreader_addEntityL(
+    SNREADER * pReader,
+    int        entity,
+    long       l) {
+  
+  SNENTITY *pe = NULL;
+  
+  /* Check parameters */
+  if (pReader == NULL) {
+    abort();
+  }
+  if (entity != SNENTITY_ARRAY) {
+    abort();
+  }
+  
+  /* Proceed only if reader not in error state */
+  if (!(pReader->status)) {
+    /* Make sure room for another entity */
+    if (pReader->queue_count >= SNREADER_MAXQUEUE) {
+      abort();
+    }
+    
+    /* Get entity pointer */
+    pe = &(pReader->queue[pReader->queue_count]);
+    
+    /* Fill in entity */
+    pe->status = entity;
+    pe->count = l;
+    
+    /* Increase the entity count */
+    (pReader->queue_count)++;
+  }
+}
+
+static void snreader_addEntityT(
+    SNREADER * pReader,
+    int        entity,
+    char     * pPrefix,
+    int        str_type,
+    char     * pData) {
+  
+  SNENTITY *pe = NULL;
+  
+  /* Check parameters */
+  if ((pReader == NULL) || (pPrefix == NULL) || (pData == NULL)) {
+    abort();
+  }
+  if ((str_type != SNSTRING_QUOTED) && (str_type != SNSTRING_CURLY)) {
+    abort();
+  }
+  if ((entity != SNENTITY_STRING) &&
+      (entity != SNENTITY_META_STRING)) {
+    abort();
+  }
+  
+  /* Proceed only if reader not in error state */
+  if (!(pReader->status)) {
+    /* Make sure room for another entity */
+    if (pReader->queue_count >= SNREADER_MAXQUEUE) {
+      abort();
+    }
+    
+    /* Get entity pointer */
+    pe = &(pReader->queue[pReader->queue_count]);
+    
+    /* Fill in entity */
+    pe->status = entity;
+    pe->pKey = pPrefix;
+    pe->str_type = str_type;
+    pe->pValue = pData;
+    
+    /* Increase the entity count */
+    (pReader->queue_count)++;
+  }
+}
+
+static void snreader_arrayPrefix(SNREADER *pReader) {
+  
+  int err_code = 0;
+  
+  /* Check parameter and state */
+  if (pReader == NULL) {
+    abort();
+  }
+  if (pReader->status) {
+    abort();
+  }
+  
+  /* Only do something if array flag is set */
+  if (pReader->array_flag) {
+    
+    /* Clear the array flag */
+    pReader->array_flag = 0;
+    
+    /* Push a value of one on top of the array stack and a value of zero
+     * on top of the grouping stack to begin a new array */
+    if (!snstack_push(&(pReader->stack_array), 1)) {
+      err_code = SNERR_DEEPARRAY;
+    }
+    
+    if (!err_code) {
+      if (!snstack_push(&(pReader->stack_group), 0)) {
+        err_code = SNERR_DEEPARRAY;
+      }
+    }
+    
+    /* Add a BEGIN_GROUP entity */
+    if (!err_code) {
+      snreader_addEntityZ(pReader, SNENTITY_BEGIN_GROUP);
+    }
+  }
+}
+
+static void snreader_fill(
+    SNREADER * pReader,
+    FILE     * pIn,
+    SNFILTER * pFilter) {
+  
+  int err_code = 0;
+  int firstchar = 0;
+  char *pks = NULL;
+  SNTOKEN tk;
+  
+  /* Initialize structures */
+  memset(&tk, 0, sizeof(SNTOKEN));
+  
+  /* Check parameters and state */
+  if ((pReader == NULL) || (pIn == NULL) || (pFilter == NULL)) {
+    abort();
+  }
+  if (pReader->status) {
+    abort();
+  }
+  if (pReader->queue_count > 0) {
+    abort();
+  }
+  
+  /* If grouping stack is empty, initialize it with a value of zero */
+  if (snstack_count(&(pReader->stack_group)) < 1) {
+    if (!snstack_push(&(pReader->stack_group), 0)) {
+      abort();
+    }
+  }
+  
+  /* Read a token */
+  tk.pKey = &(pReader->buf_key);
+  tk.pValue = &(pReader->buf_value);
+  sntoken_read(&tk, pIn, pFilter);
+  if (tk.status < 0) {
+    err_code = tk.status;
+  }
+  
+  /* Perform array prefix operation if not in metacommand mode, except
+   * for "]" token */
+  if ((!err_code) && (!pReader->meta_flag)) {
+    if (tk.status == SNTOKEN_SIMPLE) {
+      if (strcmp(snbuffer_get(&(pReader->buf_key)), "]") != 0) {
+        snreader_arrayPrefix(pReader);
+      }
+      
+    } else {
+      snreader_arrayPrefix(pReader);
+    }
+    
+    err_code = pReader->status;
+  }
+  
+  /* Get the key string pointer */
+  if (!err_code) {
+    pks = snbuffer_get(tk.pKey);
+  }
+  
+  /* Handle the token types */
+  if ((tk.status == SNTOKEN_SIMPLE) && (!err_code)) {
+    /* Simple token -- handle non-primitive and primitive cases */
+    if (strcmp(pks, "%") == 0) {
+      /* % token -- enter metacommand mode */
+      if (!pReader->meta_flag) {
+        pReader->meta_flag = 1;
+        snreader_addEntityZ(pReader, SNENTITY_BEGIN_META);
+        
+      } else {
+        /* Nested metacommands */
+        err_code = SNERR_METANEST;
+      }
+      
+    } else if (strcmp(pks, ";") == 0) {
+      /* ; token -- leave metacommand mode */
+      if (pReader->meta_flag) {
+        pReader->meta_flag = 0;
+        snreader_addEntityZ(pReader, SNENTITY_END_META);
+        
+      } else {
+        /* Semicolon outside of metacommand */
+        err_code = SNERR_SEMICOLON;
+      }
+      
+    } else if (pReader->meta_flag) {
+      /* Other simple tokens in metacommand mode */
+      snreader_addEntityS(pReader, SNENTITY_META_TOKEN, pks);
+      
+    } else {
+      /* Primitive tokens -- first, get first character */
+      firstchar = pks[0];
+      
+      /* Handle the various primitive tokens */
+      if ((firstchar == ASCII_PLUS) ||
+          (firstchar == ASCII_HYPHEN) ||
+          ((firstchar >= ASCII_ZERO) && (firstchar <= ASCII_NINE))) {
+        /* Numeric token */
+        snreader_addEntityS(pReader, SNENTITY_NUMERIC, pks);
+        
+      } else if (firstchar == ASCII_QUESTION) {
+        /* Declare variable */
+        snreader_addEntityS(pReader, SNENTITY_VARIABLE, (pks + 1));
+        
+      } else if (firstchar == ASCII_ATSIGN) {
+        /* Declare constant */
+        snreader_addEntityS(pReader, SNENTITY_CONSTANT, (pks + 1));
+        
+      } else if (firstchar == ASCII_COLON) {
+        /* Assign variable */
+        snreader_addEntityS(pReader, SNENTITY_ASSIGN, (pks + 1));
+        
+      } else if (firstchar == ASCII_EQUALS) {
+        /* Get variable or constant value */
+        snreader_addEntityS(pReader, SNENTITY_GET, (pks + 1));
+        
+      } else if (strcmp(pks, "(") == 0) {
+        /* Begin group */
+        if (snstack_inc(&(pReader->stack_group))) {
+          snreader_addEntityZ(pReader, SNENTITY_BEGIN_GROUP);
+        } else {
+          err_code = SNERR_DEEPGROUP;
+        }
+        
+      } else if (strcmp(pks, ")") == 0) {
+        /* End group */
+        if (snstack_dec(&(pReader->stack_group))) {
+          snreader_addEntityZ(pReader, SNENTITY_END_GROUP);
+        } else {
+          err_code = SNERR_RPAREN;
+        }
+        
+      } else if (strcmp(pks, "[") == 0) {
+        /* Begin array */
+        pReader->array_flag = 1;
+        
+      } else if (strcmp(pks, "]") == 0) {
+        /* End array */
+        if (!(pReader->array_flag)) {
+          /* Non-empty array -- check that array stack is not empty and
+           * that value on top of grouping stack is zero, then perform
+           * operation */
+          if (snstack_count(&(pReader->stack_array)) > 0) {
+            if (snstack_peek(&(pReader->stack_group)) == 0) {
+              snreader_addEntityZ(pReader, SNENTITY_END_GROUP);
+              snreader_addEntityL(pReader, SNENTITY_ARRAY,
+                snstack_pop(&(pReader->stack_array)));
+              snstack_pop(&(pReader->stack_group));
+              
+            } else {
+              err_code = SNERR_OPENGROUP;
+            }
+            
+          } else {
+            err_code = SNERR_RSQR;
+          }
+          
+        } else {
+          /* Empty array */
+          pReader->array_flag = 0;
+          snreader_addEntityL(pReader, SNENTITY_ARRAY, 0);
+        }
+        
+      } else if (strcmp(pks, ",") == 0) {
+        /* Array separator -- check that array stack is not empty and
+         * that value on top of grouping stack is zero, then perform
+         * operation */
+        if (snstack_count(&(pReader->stack_array)) > 0) {
+          if (snstack_peek(&(pReader->stack_group)) == 0) {
+            if (snstack_inc(&(pReader->stack_array))) {
+              snreader_addEntityZ(pReader, SNENTITY_END_GROUP);
+              snreader_addEntityZ(pReader, SNENTITY_BEGIN_GROUP);
+              
+            } else {
+              err_code = SNERR_LONGARRAY;
+            }
+              
+          } else {
+            err_code = SNERR_OPENGROUP;
+          }
+            
+        } else {
+          err_code = SNERR_RSQR;
+        }
+        
+      } else {
+        /* Operator */
+        snreader_addEntityS(pReader, SNENTITY_OPERATION, pks);
+      }
+    }
+    
+  } else if ((tk.status == SNTOKEN_STRING) && (!err_code)) {
+    /* String token -- either a normal string or a meta string */
+    if (pReader->meta_flag) {
+      snreader_addEntityT(pReader, SNENTITY_META_STRING,
+        pks, tk.str_type, snbuffer_get(tk.pValue));
+    } else {
+      snreader_addEntityT(pReader, SNENTITY_STRING,
+        pks, tk.str_type, snbuffer_get(tk.pValue));
+    }
+    
+  } else if ((tk.status == SNTOKEN_EMBED) && (!err_code)) {
+    /* Embedded token */
+    if (!(pReader->meta_flag)) {
+      snreader_addEntityS(pReader, SNENTITY_EMBEDDED, pks);
+    } else {
+      err_code = SNERR_METAEMBED;
+    }
+  
+  } else if ((tk.status == SNTOKEN_FINAL) && (!err_code)) {
+    /* Final token */
+    if (!(pReader->meta_flag)) {
+      if ((!pReader->array_flag) &&
+            (snstack_count(&(pReader->stack_array)) == 0)) {
+        if (snstack_peek(&(pReader->stack_group)) == 0) {
+          
+          snreader_addEntityZ(pReader, SNENTITY_EOF);
+          
+        } else {
+          err_code = SNERR_OPENGROUP;
+        }
+      } else {
+        err_code = SNERR_OPENARRAY;
+      }
+    } else {
+      err_code = SNERR_OPENMETA;
+    }
+    
+  } else if (!err_code) {
+    /* Unknown token type */
+    abort();
+  }
+  
+  /* Error if now an error state in reader */
+  if (!err_code) {
+    err_code = pReader->status;
+  }
+  
+  /* If error, set error in reader */
+  if (err_code) {
+    pReader->status = err_code;
+  }
+}
+
 /*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
   SNFILTER fil;
-  SNBUFFER buf_key;
-  SNBUFFER buf_val;
-  SNTOKEN tk;
+  SNREADER reader;
+  SNENTITY ent;
   int retval = 0;
   
   snfilter_reset(&fil);
-  snbuffer_init(&buf_key, 4, 1024);
-  snbuffer_init(&buf_val, 32, 65535);
-  memset(&tk, 0, sizeof(SNTOKEN));
-  tk.pKey = &buf_key;
-  tk.pValue = &buf_val;
+  snreader_init(&reader);
+  memset(&ent, 0, sizeof(SNENTITY));
   
-  for(sntoken_read(&tk, stdin, &fil);
-      tk.status >= 0;
-      sntoken_read(&tk, stdin, &fil)) {
+  for(snreader_read(&reader, &ent, stdin, &fil);
+      ent.status >= 0;
+      snreader_read(&reader, &ent, stdin, &fil)) {
     
-    if (tk.status == SNTOKEN_SIMPLE) {
-      printf("%s\n", snbuffer_get(tk.pKey));
-    
-    } else if (tk.status == SNTOKEN_STRING) {
-      if (tk.str_type == SNSTRING_QUOTED) {
-        printf("(%s) \"%s\"\n",
-            snbuffer_get(tk.pKey),
-            snbuffer_get(tk.pValue));
+    if (ent.status == SNENTITY_EOF) {
+      printf("End Of File\n");
       
-      } else if (tk.str_type == SNSTRING_CURLY) {
-        printf("(%s) {%s}\n",
-            snbuffer_get(tk.pKey),
-            snbuffer_get(tk.pValue));
+    } else if (ent.status == SNENTITY_STRING) {
+      if (ent.str_type == SNSTRING_QUOTED) {
+        printf("String (%s) \"%s\"\n", ent.pKey, ent.pValue);
+      } else if (ent.str_type == SNSTRING_CURLY) {
+        printf("String (%s) {%s}\n", ent.pKey, ent.pValue);
       } else {
-        /* Unrecognized string type */
+        /* Unknown string type */
         abort();
       }
       
-    } else if (tk.status == SNTOKEN_EMBED) {
-      printf("(%s) <<EMBED>>\n", snbuffer_get(tk.pKey));
+    } else if (ent.status == SNENTITY_EMBEDDED) {
+      printf("Embedded (%s)\n", ent.pKey);
       
-    } else if (tk.status == SNTOKEN_FINAL) {
-      printf("End Of File\n");
+    } else if (ent.status == SNENTITY_BEGIN_META) {
+      printf("Begin metacommand\n");
+      
+    } else if (ent.status == SNENTITY_END_META) {
+      printf("End metacommand\n");
+      
+    } else if (ent.status == SNENTITY_META_TOKEN) {
+      printf("Meta token %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_META_STRING) {
+      if (ent.str_type == SNSTRING_QUOTED) {
+        printf("Meta string (%s) \"%s\"\n", ent.pKey, ent.pValue);
+      } else if (ent.str_type == SNSTRING_CURLY) {
+        printf("Meta string (%s) {%s}\n", ent.pKey, ent.pValue);
+      } else {
+        /* Unknown string type */
+        abort();
+      }
+      
+    } else if (ent.status == SNENTITY_NUMERIC) {
+      printf("Numeric %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_VARIABLE) {
+      printf("Declare variable %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_CONSTANT) {
+      printf("Declare constant %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_ASSIGN) {
+      printf("Assign variable %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_GET) {
+      printf("Get value %s\n", ent.pKey);
+      
+    } else if (ent.status == SNENTITY_BEGIN_GROUP) {
+      printf("Begin group\n");
+      
+    } else if (ent.status == SNENTITY_END_GROUP) {
+      printf("End group\n");
+      
+    } else if (ent.status == SNENTITY_ARRAY) {
+      printf("Array %ld\n", ent.count);
+      
+    } else if (ent.status == SNENTITY_OPERATION) {
+      printf("Operation %s\n", ent.pKey);
       
     } else {
-      /* Unrecognized token type */
+      /* Unrecognized entity type */
       abort();
     }
     
-    if (tk.status == SNTOKEN_FINAL) {
+    if (ent.status == SNENTITY_EOF) {
       break;
     }
   }
-  if (retval != 0) {
+  if (ent.status != 0) {
     fprintf(stderr, "Error %d!\n", retval);
   }
   
-  snbuffer_reset(&buf_key, 1);
-  snbuffer_reset(&buf_val, 1);
+  snreader_reset(&reader, 1);
   
   return 0;
 }
