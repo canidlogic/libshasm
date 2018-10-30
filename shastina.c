@@ -1504,7 +1504,8 @@ static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
         /* Not the very first character -- increase line count by one if
          * the previous character was LF and the line count is not at
          * the overflow value of LONG_MAX */
-        if ((c == ASCII_LF) && (pFilter->line_count < LONG_MAX)) {
+        if ((pFilter->c == ASCII_LF) &&
+              (pFilter->line_count < LONG_MAX)) {
           (pFilter->line_count)++;
         }
         pFilter->c = c;
@@ -3207,6 +3208,7 @@ int main(int argc, char *argv[]) {
   SNREADER reader;
   SNENTITY ent;
   int retval = 0;
+  long ln = 0;
   
   snfilter_reset(&fil);
   snreader_init(&reader);
@@ -3215,6 +3217,13 @@ int main(int argc, char *argv[]) {
   for(snreader_read(&reader, &ent, stdin, &fil);
       ent.status >= 0;
       snreader_read(&reader, &ent, stdin, &fil)) {
+    
+    ln = snfilter_count(&fil);
+    if (ln < LONG_MAX) {
+      printf("%ld: ", ln);
+    } else {
+      printf("??: ");
+    }
     
     if (ent.status == SNENTITY_EOF) {
       printf("End Of File\n");
