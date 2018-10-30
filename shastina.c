@@ -8,8 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* @@TODO: replace string constants with ASCII constants */
-
 /* 
  * Error constants.
  * 
@@ -36,6 +34,7 @@
 #define SNERR_METAEMBED (-19) /* Embedded data in metacommand */
 #define SNERR_OPENMETA  (-20) /* Unclosed metacommand */
 #define SNERR_OPENARRAY (-21) /* Unclosed array */
+#define SNERR_COMMA     (-22) /* Comma used outside of array or meta */
 
 /*
  * ASCII constants.
@@ -121,13 +120,55 @@
  */
 #define SNREADER_MAXQUEUE (8)
 
-/* @@TODO: */
+/*
+ * The initial and maximum character allocations of the reader's key
+ * buffer.
+ * 
+ * The key buffer stores the main strings of tokens.  At first, it will
+ * be allocated at size SNREADER_KEY_INIT.  It can grow up to a maximum
+ * of SNREADER_KEY_MAX.
+ * 
+ * See snbuffer_init() for further information about these values.
+ */
 #define SNREADER_KEY_INIT (16)
 #define SNREADER_KEY_MAX  (65535)
+
+/*
+ * The initial and maximum character allocations of the reader's value
+ * buffer.
+ * 
+ * The value buffer stores string data.  At first, it will be allocated
+ * at size SNREADER_VAL_INIT.  It can grow up to a maximum of
+ * SNREADER_VAL_MAX.
+ * 
+ * See snbuffer_init() for further information about these values.
+ */
 #define SNREADER_VAL_INIT (256)
 #define SNREADER_VAL_MAX  (65535)
+
+/*
+ * The initial and maximum allocations of the reader's array stack, in
+ * longs.
+ * 
+ * This affects how deeply arrays can be nested.  At first, it will be
+ * allocated at size SNREADER_ARRAY_INIT.  It can grow up to a maximum
+ * of SNREADER_ARRAY_MAX.
+ * 
+ * See snstack_init() for further information about these values.
+ */
 #define SNREADER_ARRAY_INIT (8)
 #define SNREADER_ARRAY_MAX (1024)
+
+/*
+ * The initial and maximum allocations of the reader's group stack, in
+ * longs.
+ * 
+ * This affects how deeply arrays can be nested.  At first, it will be
+ * allocated at size SNREADER_GROUP_INIT.  It can grow up to a maximum
+ * of SNREADER_GROUP_MAX.
+ * 
+ * See snstack_init() for further information about these values.
+ */
 #define SNREADER_GROUP_INIT (8)
 #define SNREADER_GROUP_MAX (1024)
 
@@ -535,6 +576,8 @@ static int snchar_islegal(int c);
 static int snchar_isatomic(int c);
 static int snchar_isinclusive(int c);
 static int snchar_isexclusive(int c);
+static int snchar_strequals(int c, const char *pStr);
+static int snchar_strequals2(int c1, int c2, const char *pStr);
 
 static int snstr_readQuoted(
     SNBUFFER * pBuffer,
@@ -1128,7 +1171,8 @@ static int snbuffer_append(SNBUFFER *pBuffer, int c) {
     }
     
     /* Add the new character */
-    (pBuffer->pBuf)[pBuffer->count] = (char) c;
+    ((unsigned char *) pBuffer->pBuf)[pBuffer->count] =
+      (unsigned char) c;
     (pBuffer->count)++;
     
   } else {
@@ -1225,7 +1269,7 @@ static int snbuffer_last(SNBUFFER *pBuffer) {
   
   /* Get last character if buffer not empty */
   if (pBuffer->count > 0) {
-    c = pBuffer->pBuf[pBuffer->count - 1];
+    c = ((unsigned char *) pBuffer->pBuf)[pBuffer->count - 1];
   }
   
   /* Return character or zero */
@@ -1721,6 +1765,105 @@ static int snchar_isexclusive(int c) {
     result = 0;
   }
   
+  return result;
+}
+
+/*
+ * Determine whether a given string consists purely of the given
+ * character.
+ * 
+ * c is a unsigned byte value in 7-bit range excludeing nul (1-127) and
+ * pStr points to a null-terminated string.
+ * 
+ * This function returns non-zero only if the string has exactly one
+ * character, which is equal to c.
+ * 
+ * Parameters:
+ * 
+ *   c - the character
+ * 
+ *   pStr - pointer to the string
+ * 
+ * Return:
+ * 
+ *   non-zero if string is equal to character, zero if not
+ */
+static int snchar_strequals(int c, const char *pStr) {
+  
+  char strb[2];
+  int result = 0;
+  
+  /* Initialize buffer */
+  memset(&(strb[0]), 0, 2);
+  
+  /* Check parameters */
+  if ((c < 1) || (c > 127) || (pStr == NULL)) {
+    abort();
+  }
+  
+  /* Write character into local buffer */
+  strb[0] = (char) c;
+  
+  /* Compare strings */
+  if (strcmp(pStr, &(strb[0])) == 0) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Determine whether a given string consists purely of two given
+ * characters.
+ * 
+ * c1 and c2 are unsigned byte values in 7-bit range excluding nul
+ * (1-127) and pStr points to a null-terminated string.
+ * 
+ * This function returns non-zero only if the string has exactly two
+ * characters, the first of which equals c1 and the second of which
+ * equals c2.
+ * 
+ * Parameters:
+ * 
+ *   c1 - the first character
+ * 
+ *   c2 - the second character
+ * 
+ *   pStr - pointer to the string
+ * 
+ * Return:
+ * 
+ *   non-zero if string is equal to the two characters, zero if not
+ */
+static int snchar_strequals2(int c1, int c2, const char *pStr) {
+  
+  char strb[3];
+  int result = 0;
+  
+  /* Initialize buffer */
+  memset(&(strb[0]), 0, 3);
+  
+  /* Check parameters */
+  if ((c1 < 1) || (c1 > 127) || (pStr == NULL) ||
+      (c2 < 1) || (c2 > 127)) {
+    abort();
+  }
+  
+  /* Write characters into local buffer */
+  strb[0] = (char) c1;
+  strb[1] = (char) c2;
+  
+  /* Compare strings */
+  if (strcmp(pStr, &(strb[0])) == 0) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  /* Return result */
   return result;
 }
 
@@ -2227,7 +2370,8 @@ static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
   
   /* For simple tokens, distinguish between SIMPLE and FINAL */
   if ((!err_num) && (pToken->status == SNTOKEN_SIMPLE)) {
-    if (strcmp(snbuffer_get(pToken->pKey), "|;") == 0) {
+    if (snchar_strequals2(ASCII_BAR, ASCII_SEMICOLON,
+          snbuffer_get(pToken->pKey))) {
       pToken->status = SNTOKEN_FINAL;
     }
   }
@@ -2267,8 +2411,22 @@ static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
   }
 }
 
-/* @@TODO: */
-
+/*
+ * Initialize a Shastina reader state structure.
+ * 
+ * All Shastina readers must be initialized before they are used, or
+ * undefined behavior occurs.
+ * 
+ * Do not re-initialize a Shastina reader that is already initialized,
+ * or a memory leak may occur.
+ * 
+ * Shastina readers must be fully reset with snreader_reset() before
+ * they are released, or a memory leak may occur.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader structure to initialize
+ */
 static void snreader_init(SNREADER *pReader) {
   
   /* Check parameter */
@@ -2297,6 +2455,22 @@ static void snreader_init(SNREADER *pReader) {
   pReader->array_flag = 0;
 }
 
+/*
+ * Reset a Shastina reader back to its initial state.
+ * 
+ * If full is non-zero, a full reset will be performed.  If full is
+ * zero, a fast reset is performed.  A full reset releases all memory
+ * buffers, while a fast reset keeps the memory buffers allocated.
+ * 
+ * A full reset must be performed on a reader before it is released, or
+ * a memory leak occurs.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader structure to reset
+ * 
+ *   full - non-zero for full reset, zero for fast reset
+ */
 static void snreader_reset(SNREADER *pReader, int full) {
   
   /* Check parameters */
@@ -2320,6 +2494,30 @@ static void snreader_reset(SNREADER *pReader, int full) {
   pReader->array_flag = 0;
 }
 
+/*
+ * Read an entity from a Shastina source file.
+ * 
+ * pReader is the reader object, which must be properly initialized.
+ * 
+ * pEntity is the entity structure that will be filled in.  Its state
+ * upon entry to the function is irrelevant.  Upon return, it will hold
+ * the results of the operation.  See the structure documentation for
+ * further information.
+ * 
+ * pIn is the input file to read from.  It must be open for reading.
+ * Reading is sequential.
+ * 
+ * pFilter is the input filter to pass the input through.  It must be
+ * properly initialized.
+ * 
+ * Once an error is encountered, the reader object will return that same
+ * error each time this function is called without doing anything
+ * further.
+ * 
+ * Once the End Of File (EOF) entity is returned, this function will
+ * return the EOF entity on all subsequent calls without doing anything
+ * further.
+ */
 static void snreader_read(
     SNREADER * pReader,
     SNENTITY * pEntity,
@@ -2333,6 +2531,9 @@ static void snreader_read(
       (pFilter == NULL)) {
     abort();
   }
+  
+  /* Clear provided entity */
+  memset(pEntity, 0, sizeof(SNENTITY));
   
   /* Fail immediately if reader is in error state */
   err_code = pReader->status;
@@ -2355,6 +2556,7 @@ static void snreader_read(
       
       (pReader->queue_read)++;
       if (pReader->queue_read >= pReader->queue_count) {
+        /* We've read everything in the queue, so clear it */
         pReader->queue_count = 0;
         pReader->queue_read = 0;
       }
@@ -2366,6 +2568,35 @@ static void snreader_read(
   }
 }
 
+/*
+ * Add an entity with no parameters (type "Z") to the queue of a given
+ * reader.
+ * 
+ * pReader is the reader to add the entity to.
+ * 
+ * entity is the SNENTITY_ constant describing the kind of entity.
+ * 
+ * The only entities allowed by this function are:
+ * 
+ *   - SNENTITY_EOF
+ *   - SNENTITY_BEGIN_META
+ *   - SNENTITY_END_META
+ *   - SNENTITY_BEGIN_GROUP
+ *   - SNENTITY_END_GROUP
+ * 
+ * Passing any other kind of entity code results in a fault.
+ * 
+ * The queue of the reader must not be full or this function will fault.
+ * See SNREADER_MAXQUEUE for more information.
+ * 
+ * If the reader is in an error state, this call is ignored.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   entity - the entity code
+ */
 static void snreader_addEntityZ(SNREADER *pReader, int entity) {
   
   SNENTITY *pe = NULL;
@@ -2400,6 +2631,42 @@ static void snreader_addEntityZ(SNREADER *pReader, int entity) {
   }
 }
 
+/*
+ * Add an entity with one string parameter (type "S") to the queue of a
+ * given reader.
+ * 
+ * pReader is the reader to add the entity to.
+ * 
+ * entity is the SNENTITY_ constant describing the kind of entity.
+ * 
+ * s is the string parameter.
+ * 
+ * The only entities allowed by this function are:
+ * 
+ *   - SNENTITY_EMBEDDED
+ *   - SNENTITY_META_TOKEN
+ *   - SNENTITY_NUMERIC
+ *   - SNENTITY_VARIABLE
+ *   - SNENTITY_CONSTANT
+ *   - SNENTITY_ASSIGN
+ *   - SNENTITY_GET
+ *   - SNENTITY_OPERATION
+ * 
+ * Passing any other kind of entity code results in a fault.
+ * 
+ * The queue of the reader must not be full or this function will fault.
+ * See SNREADER_MAXQUEUE for more information.
+ * 
+ * If the reader is in an error state, this call is ignored.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   entity - the entity code
+ * 
+ *   s - the string parameter
+ */
 static void snreader_addEntityS(
     SNREADER * pReader,
     int        entity,
@@ -2441,6 +2708,35 @@ static void snreader_addEntityS(
   }
 }
 
+/*
+ * Add an entity with one long parameter (type "L") to the queue of a
+ * given reader.
+ * 
+ * pReader is the reader to add the entity to.
+ * 
+ * entity is the SNENTITY_ constant describing the kind of entity.
+ * 
+ * l is the long parameter.
+ * 
+ * The only entities allowed by this function are:
+ * 
+ *   - SNENTITY_ARRAY
+ * 
+ * Passing any other kind of entity code results in a fault.
+ * 
+ * The queue of the reader must not be full or this function will fault.
+ * See SNREADER_MAXQUEUE for more information.
+ * 
+ * If the reader is in an error state, this call is ignored.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   entity - the entity code
+ * 
+ *   l - the long value
+ */
 static void snreader_addEntityL(
     SNREADER * pReader,
     int        entity,
@@ -2475,6 +2771,39 @@ static void snreader_addEntityL(
   }
 }
 
+/*
+ * Add an entity with prefix, type, and data parameters (type "T") to
+ * the queue of a given reader.
+ * 
+ * pReader is the reader to add the entity to.
+ * 
+ * entity is the SNENTITY_ constant describing the kind of entity.
+ * 
+ * pPrefix points to the prefix string.
+ * 
+ * str_type is the string type.  It must be one of the SNSTRING_
+ * constants.
+ * 
+ * pData points to the string data.
+ * 
+ * The only entities allowed by this function are:
+ * 
+ *   - SNENTITY_STRING
+ *   - SNENTITY_META_STRING
+ * 
+ * Passing any other kind of entity code results in a fault.
+ * 
+ * The queue of the reader must not be full or this function will fault.
+ * See SNREADER_MAXQUEUE for more information.
+ * 
+ * If the reader is in an error state, this call is ignored.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   entity - the entity code
+ */
 static void snreader_addEntityT(
     SNREADER * pReader,
     int        entity,
@@ -2517,6 +2846,37 @@ static void snreader_addEntityT(
   }
 }
 
+/*
+ * Perform the array prefix operation.
+ * 
+ * This should be performed before processing any token except for "]".
+ * 
+ * pReader is the reader object.  The reader must not be in an error
+ * state, or a fault occurs.
+ * 
+ * This operation only does something if the array flag is on.  In that
+ * case, the array flag is turned off, the array and grouping stacks are
+ * adjusted to indicate a new array, and a BEGIN_GROUP entity is added
+ * to the reader.
+ * 
+ * These are operations that should have properly been done when the "["
+ * token was processed.  But that token needs to know whether the array
+ * is empty (followed immediately by a "]" token) or non-empty.  Hence,
+ * it sets the array flag and its processing is delayed until the next
+ * token, which calls into this array prefix operation to do the delayed
+ * array operation if the array flag is set.
+ * 
+ * This is therefore done before every token except for "]", which
+ * handles the situation differently because the empty array case is
+ * different.  Hence, this function must *not* be called before the "]"
+ * token.
+ * 
+ * This function may set the reader into an error state.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ */
 static void snreader_arrayPrefix(SNREADER *pReader) {
   
   int err_code = 0;
@@ -2554,6 +2914,30 @@ static void snreader_arrayPrefix(SNREADER *pReader) {
   }
 }
 
+/* 
+ * Read a token from a Shastina source file in an effort to fill the
+ * entity queue.
+ * 
+ * Clients should not use this function directly.  Use snreader_read()
+ * instead (which makes use of this function).
+ * 
+ * The reader must not be in an error state and the queue must be empty.
+ * If these conditions are not satisfied, a fault occurs.  A fault may
+ * also occur if SNREADER_MAXQUEUE is not large enough -- see that
+ * constant for further information.
+ * 
+ * Not all tokens result in entities being read, so to ensure the entity
+ * buffer is filled with at least one entity, call this function in a
+ * loop.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   pIn - the input file
+ * 
+ *   pFilter - the filter to pass input through
+ */
 static void snreader_fill(
     SNREADER * pReader,
     FILE     * pIn,
@@ -2593,30 +2977,33 @@ static void snreader_fill(
     err_code = tk.status;
   }
   
-  /* Perform array prefix operation if not in metacommand mode, except
-   * for "]" token */
-  if ((!err_code) && (!pReader->meta_flag)) {
-    if (tk.status == SNTOKEN_SIMPLE) {
-      if (strcmp(snbuffer_get(&(pReader->buf_key)), "]") != 0) {
-        snreader_arrayPrefix(pReader);
-      }
-      
-    } else {
-      snreader_arrayPrefix(pReader);
-    }
-    
-    err_code = pReader->status;
-  }
-  
   /* Get the key string pointer */
   if (!err_code) {
     pks = snbuffer_get(tk.pKey);
   }
   
+  /* Perform array prefix operation if not in metacommand mode, except
+   * for "]" token */
+  if ((!err_code) && (!pReader->meta_flag)) {
+    if (tk.status == SNTOKEN_SIMPLE) {
+      if (!snchar_strequals(ASCII_RSQR, pks)) {
+        /* Simple token except for "]" */
+        snreader_arrayPrefix(pReader);
+      }
+      
+    } else {
+      /* Not in metacommand mode and not a simple token */
+      snreader_arrayPrefix(pReader);
+    }
+    
+    /* Check for errors from the prefix operation */
+    err_code = pReader->status;
+  }
+  
   /* Handle the token types */
   if ((tk.status == SNTOKEN_SIMPLE) && (!err_code)) {
     /* Simple token -- handle non-primitive and primitive cases */
-    if (strcmp(pks, "%") == 0) {
+    if (snchar_strequals(ASCII_PERCENT, pks)) {
       /* % token -- enter metacommand mode */
       if (!pReader->meta_flag) {
         pReader->meta_flag = 1;
@@ -2627,7 +3014,7 @@ static void snreader_fill(
         err_code = SNERR_METANEST;
       }
       
-    } else if (strcmp(pks, ";") == 0) {
+    } else if (snchar_strequals(ASCII_SEMICOLON, pks)) {
       /* ; token -- leave metacommand mode */
       if (pReader->meta_flag) {
         pReader->meta_flag = 0;
@@ -2669,27 +3056,29 @@ static void snreader_fill(
         /* Get variable or constant value */
         snreader_addEntityS(pReader, SNENTITY_GET, (pks + 1));
         
-      } else if (strcmp(pks, "(") == 0) {
+      } else if (snchar_strequals(ASCII_LPAREN, pks)) {
         /* Begin group */
         if (snstack_inc(&(pReader->stack_group))) {
           snreader_addEntityZ(pReader, SNENTITY_BEGIN_GROUP);
         } else {
+          /* Too much group nesting */
           err_code = SNERR_DEEPGROUP;
         }
         
-      } else if (strcmp(pks, ")") == 0) {
+      } else if (snchar_strequals(ASCII_RPAREN, pks)) {
         /* End group */
         if (snstack_dec(&(pReader->stack_group))) {
           snreader_addEntityZ(pReader, SNENTITY_END_GROUP);
         } else {
+          /* Closing parenthesis without an opening parenthesis */
           err_code = SNERR_RPAREN;
         }
         
-      } else if (strcmp(pks, "[") == 0) {
+      } else if (snchar_strequals(ASCII_LSQR, pks)) {
         /* Begin array */
         pReader->array_flag = 1;
         
-      } else if (strcmp(pks, "]") == 0) {
+      } else if (snchar_strequals(ASCII_RSQR, pks)) {
         /* End array */
         if (!(pReader->array_flag)) {
           /* Non-empty array -- check that array stack is not empty and
@@ -2703,10 +3092,12 @@ static void snreader_fill(
               snstack_pop(&(pReader->stack_group));
               
             } else {
+              /* Still unclosed parentheses in current element */
               err_code = SNERR_OPENGROUP;
             }
             
           } else {
+            /* "]" without a corresponding opening bracket */
             err_code = SNERR_RSQR;
           }
           
@@ -2716,7 +3107,7 @@ static void snreader_fill(
           snreader_addEntityL(pReader, SNENTITY_ARRAY, 0);
         }
         
-      } else if (strcmp(pks, ",") == 0) {
+      } else if (snchar_strequals(ASCII_COMMA, pks)) {
         /* Array separator -- check that array stack is not empty and
          * that value on top of grouping stack is zero, then perform
          * operation */
@@ -2727,15 +3118,18 @@ static void snreader_fill(
               snreader_addEntityZ(pReader, SNENTITY_BEGIN_GROUP);
               
             } else {
+              /* Too many array elements */
               err_code = SNERR_LONGARRAY;
             }
               
           } else {
+            /* Open parentheses in current element */
             err_code = SNERR_OPENGROUP;
           }
             
         } else {
-          err_code = SNERR_RSQR;
+          /* Comma used outside of array */
+          err_code = SNERR_COMMA;
         }
         
       } else {
@@ -2747,9 +3141,11 @@ static void snreader_fill(
   } else if ((tk.status == SNTOKEN_STRING) && (!err_code)) {
     /* String token -- either a normal string or a meta string */
     if (pReader->meta_flag) {
+      /* Meta string */
       snreader_addEntityT(pReader, SNENTITY_META_STRING,
         pks, tk.str_type, snbuffer_get(tk.pValue));
     } else {
+      /* Normal string */
       snreader_addEntityT(pReader, SNENTITY_STRING,
         pks, tk.str_type, snbuffer_get(tk.pValue));
     }
@@ -2759,6 +3155,7 @@ static void snreader_fill(
     if (!(pReader->meta_flag)) {
       snreader_addEntityS(pReader, SNENTITY_EMBEDDED, pks);
     } else {
+      /* Embedded data not allowed in metacommands */
       err_code = SNERR_METAEMBED;
     }
   
@@ -2769,15 +3166,19 @@ static void snreader_fill(
             (snstack_count(&(pReader->stack_array)) == 0)) {
         if (snstack_peek(&(pReader->stack_group)) == 0) {
           
+          /* Add the EOF entity */
           snreader_addEntityZ(pReader, SNENTITY_EOF);
           
         } else {
+          /* Open parentheses group remains */
           err_code = SNERR_OPENGROUP;
         }
       } else {
+        /* Open array remains */
         err_code = SNERR_OPENARRAY;
       }
     } else {
+      /* Open metacommand remains */
       err_code = SNERR_OPENMETA;
     }
     
