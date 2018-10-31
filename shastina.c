@@ -548,6 +548,32 @@ typedef struct {
   
 } SNREADER;
 
+/*
+ * Structure for storing state of the Shastina metalanguage parser.
+ * 
+ * Use the snparser_ functions to manipulate this structure.
+ */
+typedef struct {
+  
+  /*
+   * The reader object.
+   * 
+   * This must be initialized with snreader_init().
+   * 
+   * It must be fully reset with snreader_reset() before the structure
+   * is released.
+   */
+  SNREADER reader;
+  
+  /*
+   * The input filter object.
+   * 
+   * This must be initialized with snfilter_reset().
+   */
+  SNFILTER filter;
+  
+} SNPARSER;
+
 /* Function prototypes */
 static void snstack_init(SNSTACK *pStack, long icap, long maxcap);
 static void snstack_reset(SNSTACK *pStack, int full);
@@ -626,6 +652,12 @@ static void snreader_fill(
     SNREADER * pReader,
     FILE     * pIn,
     SNFILTER * pFilter);
+
+SNPARSER *snparser_alloc(void);
+void snparser_free(SNPARSER *pParser);
+void snparser_read(SNPARSER *pParser, SNENTITY *pEntity, FILE *pIn);
+long snparser_count(SNPARSER *pParser);
+int snparser_bomflag(SNPARSER *pParser);
 
 /*
  * Initialize a long stack.
@@ -2518,6 +2550,16 @@ static void snreader_reset(SNREADER *pReader, int full) {
  * Once the End Of File (EOF) entity is returned, this function will
  * return the EOF entity on all subsequent calls without doing anything
  * further.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   pEntity - pointer to the entity to receive the results
+ * 
+ *   pIn - the input file
+ * 
+ *   pFilter - the input filter
  */
 static void snreader_read(
     SNREADER * pReader,
@@ -3200,25 +3242,165 @@ static void snreader_fill(
 }
 
 /*
+ * Allocate a new Shastina parser.
+ * 
+ * The parser must eventually be freed with snparser_free().
+ * 
+ * Return:
+ * 
+ *   a new Shastina parser
+ */
+SNPARSER *snparser_alloc(void) {
+  
+  SNPARSER *pParser = NULL;
+  
+  /* Allocate structure */
+  pParser = (SNPARSER *) malloc(sizeof(SNPARSER));
+  if (pParser == NULL) {
+    abort();
+  }
+  memset(pParser, 0, sizeof(SNPARSER));
+  
+  /* Initialize */
+  snreader_init(&(pParser->reader));
+  snfilter_reset(&(pParser->filter));
+  
+  /* Return parser */
+  return pParser;
+}
+
+/*
+ * Free a Shastina parser.
+ * 
+ * This call is ignored if NULL is passed.
+ * 
+ * The parser object must not be used again after freeing it.
+ * 
+ * Parameters:
+ * 
+ *   pParser - the parser object to free
+ */
+void snparser_free(SNPARSER *pParser) {
+  
+  /* Only do something if not NULL */
+  if (pParser != NULL) {
+    /* Fully reset reader and release */
+    snreader_reset(&(pParser->reader), 1);
+    free(pParser);
+  }
+}
+
+/*
+ * Parse an entity from a Shastina source file.
+ * 
+ * pParser is the parser object.
+ * 
+ * pEntity is the entity structure that will be filled in.  Its state
+ * upon entry to the function is irrelevant.  Upon return, it will hold
+ * the results of the operation.  See the structure documentation for
+ * further information.
+ * 
+ * pIn is the input file to read from.  It must be open for reading.
+ * Reading is sequential.
+ * 
+ * Once an error is encountered, the parser object will return that same
+ * error each time this function is called without doing anything
+ * further.
+ * 
+ * Once the End Of File (EOF) entity is returned, this function will
+ * return the EOF entity on all subsequent calls without doing anything
+ * further.
+ * 
+ * Parameters:
+ * 
+ *   pReader - the reader object
+ * 
+ *   pEntity - pointer to the entity to receive the results
+ * 
+ *   pIn - the input file
+ */
+void snparser_read(SNPARSER *pParser, SNENTITY *pEntity, FILE *pIn) {
+  
+  /* Check parameters */
+  if ((pParser == NULL) || (pEntity == NULL) || (pIn == NULL)) {
+    abort();
+  }
+  
+  /* Call through to reader */
+  snreader_read(&(pParser->reader), pEntity, pIn, &(pParser->filter));
+}
+
+/*
+ * Return the current line count.
+ * 
+ * The line count is always at least one and at most LONG_MAX.  The
+ * value of LONG_MAX is an overflow value, so any count of lines above
+ * that will just remain at LONG_MAX.
+ * 
+ * Parameters:
+ * 
+ *   pParser - the parser object
+ * 
+ * Return:
+ * 
+ *   the current line count
+ */
+long snparser_count(SNPARSER *pParser) {
+  
+  /* Check parameter */
+  if (pParser == NULL) {
+    abort();
+  }
+  
+  /* Return line count */
+  return snfilter_count(&(pParser->filter));
+}
+
+/*
+ * Check whether a UTF-8 Byte Order Mark was present at the start of
+ * input.
+ * 
+ * This is only meaningful after the first entity has been read with a
+ * call to snparser_read().  Before the first call to the read function,
+ * the BOM flag is always clear because the file hasn't been read yet.
+ * 
+ * Parameter:
+ * 
+ *   pParser - the parser object
+ * 
+ * Return:
+ * 
+ *   non-zero if UTF-8 BOM was present, zero if not
+ */
+int snparser_bomflag(SNPARSER *pParser) {
+  
+  /* Check parameter */
+  if (pParser == NULL) {
+    abort();
+  }
+  
+  /* Return BOM flag */
+  return snfilter_bomflag(&(pParser->filter));
+}
+
+/*
  * @@TODO:
  */
 int main(int argc, char *argv[]) {
   
-  SNFILTER fil;
-  SNREADER reader;
+  SNPARSER *pParser = NULL;
   SNENTITY ent;
   int retval = 0;
   long ln = 0;
   
-  snfilter_reset(&fil);
-  snreader_init(&reader);
+  pParser = snparser_alloc();
   memset(&ent, 0, sizeof(SNENTITY));
   
-  for(snreader_read(&reader, &ent, stdin, &fil);
+  for(snparser_read(pParser, &ent, stdin);
       ent.status >= 0;
-      snreader_read(&reader, &ent, stdin, &fil)) {
+      snparser_read(pParser, &ent, stdin)) {
     
-    ln = snfilter_count(&fil);
+    ln = snparser_count(pParser);
     if (ln < LONG_MAX) {
       printf("%ld: ", ln);
     } else {
@@ -3300,7 +3482,8 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Error %d!\n", retval);
   }
   
-  snreader_reset(&reader, 1);
+  snparser_free(pParser);
+  pParser = NULL;
   
   return 0;
 }
