@@ -2,18 +2,28 @@
 ## 1. Introduction
 The Shastina Metainterpreter (shastina) is an implementation of the Shastina metalanguage, which allows for the rapid implementation of special-purpose programming languages.
 
-## 2. Project status
-This project has been dormant for a few months, but as of October 2018, work has restarted.
-
-The new Shastina implementation has a greatly simplified structure that makes it more practical to use, more efficient, and more flexible.
-
-The alpha 0.2.2 series work has been discontinued, in favor of the new implementation.  However, the sophisticated string reading algorithms of the alpha 0.2.2 series (which are not present in the new implementation) will eventually be spun off into a separate project.
-
-I plan to have a fully functional implementation of Shastina available by October 31, 2018.
-
 Development work on this library is being handled by Noah Johnson (canidlogic on GitHub).  He can be reached by email at noah.johnson@loupmail.com
 
-## 3. Releases
+## 2. Known issues
+### 2.1 Line numbers in embedded data
+This issue only affects clients that make use of embedded data.  Embedded data will work, except there is currently no way for the client to inform Shastina how many line breaks were present in the embedded data, so the line numbers reported by Shastina may be wrong after embedded data.  Apart from the faulty line numbers after embedded data, everything else should work.
+
+### 2.2 Missing documentation
+Some comments in the source code still need to be written, but more importantly there needs to be a rewrite of the Shastina Specification.  The current specification draft (3V:C4-5; March 9, 2018, available separately) does not match the Shastina language as implemented by the current library.
+
+## 3. Missing features
+The core Shastina interpreter is now complete.  However, a utility module with the following useful functionality needs to be added to the distribution:
+
+* **Dictionary object** used for translating predefined strings to numeric codes.
+* **Numeric parsing** to help with translating text representations into numbers.
+
+These will be added as separate modules in future releases.  Although not required by the core parser, these utility features address common client implementation issues.
+
+## 4. Releases
+
+### 0.9.0 (beta)
+
+Shastina has been rewritten from scratch with a new, simplified implementation.  The core Shastina metainterpreter is fully functional in this release, except for a few minor issues.
 
 ### 0.2.2 (alpha)
 
