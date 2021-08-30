@@ -12,11 +12,11 @@
 /* 
  * Error constants.
  * 
- * These must all be negative.
+ * These must all be negative and should be distinct.
  */
 #define SNERR_IOERR     (-1)  /* I/O error */
 #define SNERR_EOF       (-2)  /* End Of File */
-#define SNERR_BADSIG    (-3)  /* Unrecognized file signature */
+#define SNERR_BADCR     (-3)  /* CR character not followed by LF */
 #define SNERR_OPENSTR   (-4)  /* File ends in middle of string */
 #define SNERR_LONGSTR   (-5)  /* String is too long */
 #define SNERR_NULLCHR   (-6)  /* Null character encountered in string */
@@ -32,36 +32,44 @@
 #define SNERR_RSQR      (-16) /* Right square bracket outside array */
 #define SNERR_OPENGROUP (-17) /* Open group */
 #define SNERR_LONGARRAY (-18) /* Array has too many elements */
-#define SNERR_METAEMBED (-19) /* Embedded data in metacommand */
+#define SNERR_UNPAIRED  (-19) /* Unpaired surrogates encountered */
 #define SNERR_OPENMETA  (-20) /* Unclosed metacommand */
 #define SNERR_OPENARRAY (-21) /* Unclosed array */
 #define SNERR_COMMA     (-22) /* Comma used outside of array or meta */
+#define SNERR_UTF8      (-23) /* Invalid UTF-8 in input */
 
 /*
  * The types of entities.
  */
 #define SNENTITY_EOF          (0)   /* End Of File */
 #define SNENTITY_STRING       (1)   /* String literal */
-#define SNENTITY_EMBEDDED     (2)   /* Embedded data */
-#define SNENTITY_BEGIN_META   (3)   /* Begin metacommand */
-#define SNENTITY_END_META     (4)   /* End metacommand */
-#define SNENTITY_META_TOKEN   (5)   /* Metacommand token */
-#define SNENTITY_META_STRING  (6)   /* Metacommand string */
-#define SNENTITY_NUMERIC      (7)   /* Numeric literal */
-#define SNENTITY_VARIABLE     (8)   /* Declare variable */
-#define SNENTITY_CONSTANT     (9)   /* Declare constant */
-#define SNENTITY_ASSIGN       (10)  /* Assign value of variable */
-#define SNENTITY_GET          (11)  /* Get variable or constant */
-#define SNENTITY_BEGIN_GROUP  (12)  /* Begin group */
-#define SNENTITY_END_GROUP    (13)  /* End group */
-#define SNENTITY_ARRAY        (14)  /* Define array */
-#define SNENTITY_OPERATION    (15)  /* Operation */
+#define SNENTITY_BEGIN_META   (2)   /* Begin metacommand */
+#define SNENTITY_END_META     (3)   /* End metacommand */
+#define SNENTITY_META_TOKEN   (4)   /* Metacommand token */
+#define SNENTITY_META_STRING  (5)   /* Metacommand string */
+#define SNENTITY_NUMERIC      (6)   /* Numeric literal */
+#define SNENTITY_VARIABLE     (7)   /* Declare variable */
+#define SNENTITY_CONSTANT     (8)   /* Declare constant */
+#define SNENTITY_ASSIGN       (9)   /* Assign value of variable */
+#define SNENTITY_GET          (10)  /* Get variable or constant */
+#define SNENTITY_BEGIN_GROUP  (11)  /* Begin group */
+#define SNENTITY_END_GROUP    (12)  /* End group */
+#define SNENTITY_ARRAY        (13)  /* Define array */
+#define SNENTITY_OPERATION    (14)  /* Operation */
 
 /*
  * The types of strings.
  */
 #define SNSTRING_QUOTED (1) /* Double-quoted strings */
 #define SNSTRING_CURLY  (2) /* Curly-bracketed strings */
+
+/*
+ * The SNSOURCE structure prototype.
+ * 
+ * The actual structure definition is given in the implementation file.
+ */
+struct SNSOURCE_TAG;
+typedef struct SNSOURCE_TAG SNSOURCE;
 
 /*
  * The SNPARSER structure prototype.
@@ -99,9 +107,6 @@ typedef struct {
    * 
    * For NUMERIC entities, this is the numeric value represented as a
    * string.  It is up to the clients to parse this as a number.
-   * 
-   * For EMBEDDED entities, this is the embedded data prefix, which does
-   * not include the opening grave accent.
    * 
    * For STRING and META_STRING entities, this is the string prefix,
    * which does not include the opening quote or curly bracket.
@@ -153,6 +158,241 @@ typedef struct {
 } SNENTITY;
 
 /*
+ * Allocate a Shastina source that wraps a stdio FILE handle.
+ * 
+ * pFile is the file handle to wrap.  It must be open for reading or
+ * undefined behavior occurs.  Nothing besides the allocated Shastina
+ * source should use the file while the source object is allocated or
+ * undefined behavior occurs.
+ * 
+ * owner is non-zero if the Shastina source object is the owner of the
+ * file handle, zero if not.  If the Shastina source object is the owner
+ * of the file handle, a destructor routine will be included in the
+ * source structure that closes the file handled, such that the file
+ * handle will be closed when the Shastina source is released.  If the
+ * Shastina source object is not the owner of the file handle, then no
+ * destructor routine will be added and the file handle will NOT be
+ * closed when the source object is released.
+ * 
+ * If you are passing stdin as the file, owner should be zero.
+ * 
+ * Calls to read from the Shastina source will read from the underlying
+ * file handle.  Reading is fully sequential, so you may pass stdin as
+ * the file handle.
+ * 
+ * The returned source object should eventually be freed with
+ * snsource_free().
+ * 
+ * If the whole Shastina file is interpreted successfully, then after
+ * reading the |; EOF token, the underlying file handle will be
+ * positioned to read the byte immediately following the EOF token, and
+ * snsource_bytes() will have how many bytes total were read up to and
+ * including the semicolon in the |; EOF token.
+ * 
+ * If you want to make sure nothing besides whitespace and blank lines
+ * remains in the file after the |; EOF token, use snsource_consume().
+ * 
+ * Parameters:
+ * 
+ *   pFile - the file handle to wrap
+ * 
+ *   owner - non-zero if the source object is the owner of the file
+ *   handle, zero if not
+ * 
+ * Return:
+ * 
+ *   a new Shastina source wrapping the file handle
+ */
+SNSOURCE *snsource_file(FILE *pFile, int owner);
+
+/*
+ * Allocate a Shastina source that wraps a nul-terminated string.
+ * 
+ * pStr is a pointer to the nul-terminated string to wrap.  It must
+ * remain allocated and it must not be changed while the Shastina source
+ * is allocated or undefined behavior occurs.
+ * 
+ * The terminating nul character is interpreted as the "end of file" and
+ * is not included in the bytes that are read through the source.
+ * 
+ * Calls to read from the Shastina source will read bytes from the given
+ * string.
+ * 
+ * The returned source object should eventually be freed with
+ * snsource_free().
+ * 
+ * No destructor routine is registered, so you may safely pass static
+ * string data.  Note, however, that if you pass a dynamically allocated
+ * string, it will NOT be automatically freed when the Shastina source
+ * is closed.
+ * 
+ * If the whole Shastina file is interpreted successfully, then after
+ * reading the |; EOF token, snsource_bytes() will have how many bytes
+ * total were read up to and including the semicolon in the |; EOF
+ * token.
+ * 
+ * If you want to make sure nothing besides whitespace and blank lines
+ * remains in the string after the |; EOF token, use snsource_consume().
+ * 
+ * Parameters:
+ * 
+ *   pStr - the nul-terminated string to wrap
+ * 
+ * Return:
+ * 
+ *   a new Shastina source wrapping the string
+ */
+SNSOURCE *snsource_string(const char *pStr);
+
+/*
+ * Allocate a custom Shastina source.
+ * 
+ * This is the most flexible Shastina source constructor, which allows
+ * you full control over how the Shastina source works.  The other
+ * snsource_file() and snsource_string() constructors are much easier to
+ * use, but more limited.
+ * 
+ * read_func is a function pointer to a callback function.  It may not
+ * be NULL.  The void pointer it takes will always be the same as the
+ * custom parameter passed to this constructor function.  The read
+ * function should return the unsigned byte value (0-255) of the next
+ * byte from the input source, or SNERR_EOF if End Of File (EOF) has
+ * been reached, or SNERR_IOERR if there was an I/O error reading the
+ * input source.
+ * 
+ * Once the callback function has returned SNERR_EOF or SNERR_IOERR, it
+ * will not be called again.
+ * 
+ * free_func is a function pointer to a destructor function, or NULL if
+ * no destructor function is required.
+ * 
+ * If free_func is not NULL, then it will be called immediately before
+ * releasing the Shastina source object, with the void pointer set to
+ * the custom parameter passed to this constructor function.  The
+ * destructor may be used for freeing whatever is pointed to by the
+ * custom parameter.  If this is not needed, use NULL for the
+ * destructor.
+ * 
+ * custom is a custom parameter that is passed through to both the read
+ * callback and the destructor function (if the destructor is defined).
+ * custom may be anything, including NULL.
+ * 
+ * The returned source object should eventually be freed with
+ * snsource_free().
+ * 
+ * Parameters:
+ * 
+ *   read_func - the read callback
+ * 
+ *   free_func - the destructor callback, or NULL
+ * 
+ *   custom - the custom data, which may be NULL
+ * 
+ * Return:
+ * 
+ *   a new, custom Shastina source
+ */
+SNSOURCE *snsource_custom(
+    int (*read_func)(void *),
+    void (*free_func)(void *),
+    void *custom);
+
+/*
+ * Free a Shastina source.
+ * 
+ * This call is ignored if NULL is passed.
+ * 
+ * The source object must not be used again after freeing it.
+ * 
+ * This call will also run any registered destructor routine within the
+ * source structure.
+ * 
+ * Parameters:
+ * 
+ *   pSrc - the source object to free or NULL
+ */
+void snsource_free(SNSOURCE *pSrc);
+
+/*
+ * Determine how many bytes have been successfully read through the
+ * source.
+ * 
+ * If the total number of bytes exceeds the range of a long, then
+ * LONG_MAX will be returned.
+ * 
+ * This count does NOT include any SNERR_EOF or SNERR_IOERR codes that
+ * were returned from the source.  It only includes actual bytes that
+ * were read through the source.
+ * 
+ * After successfully reading the |; entity, this count will be total
+ * number of bytes from the start of the file up to and including the
+ * semicolon in the |; entity.
+ * 
+ * Parameters:
+ * 
+ *   pSrc - the source object to query
+ * 
+ * Return:
+ * 
+ *   the number of bytes read through the source, or LONG_MAX if this
+ *   count exceeds the limit of a long
+ */
+long snsource_bytes(SNSOURCE *pSrc);
+
+/*
+ * Consume the rest of the data in a source and make sure that there is
+ * nothing but whitespace and blank lines.
+ * 
+ * pSrc is the source object to consume.
+ * 
+ * This function will keep reading from the source until one of the
+ * following happens:
+ * 
+ *   (1) Something other than SP HT CR LF is read
+ *   (2) SNERR_EOF is encountered
+ *   (3) SNERR_IOERR is encountered
+ *   (4) Some other error is encountered
+ * 
+ * The function succeeds and returns greater than zero in case (2),
+ * which indicates that only whitespace and blank lines remained in the
+ * file.
+ * 
+ * The function fails and returns SNERR_TRAILER in case (1) or (4), or
+ * the error code SNERR_IOERR in case (3).
+ * 
+ * Do not use this function in the middle of parsing a Shastina file
+ * with the source or undefined behavior occurs.
+ * 
+ * This function is intended for cases where nothing should follow the
+ * |; EOF marker in the Shastina file.  Parsing stops at the semicolon
+ * in the |; EOF marker without reading any further than that.  This
+ * function can then make sure that nothing besides whitespace and blank
+ * lines remains after the |; EOF marker.
+ * 
+ * Note that after you use this function, snsource_bytes() will be
+ * changed to include the number of additional bytes consumed by this
+ * function.  You can therefore no longer use snsource_bytes() to count
+ * the number of bytes up to the |; EOF marker after calling this
+ * function.
+ * 
+ * You may call this on a source that has already reached EOF, in which
+ * case this function will just return greater than zero.
+ * 
+ * Parameters:
+ * 
+ *   pSrc - the Shastina source object
+ * 
+ * Return:
+ * 
+ *   greater than zero if all remaining data has been read from the
+ *   source and nothing besides whitespace and blank lines remained,
+ *   SNERR_TRAILER if something besides whitespace and blank lines was
+ *   encountered, SNERR_IOERR if there was an I/O error reading from the
+ *   source object
+ */
+int snsource_consume(SNSOURCE *pSrc);
+
+/*
  * Allocate a new Shastina parser.
  * 
  * The parser must eventually be freed with snparser_free().
@@ -172,7 +412,7 @@ SNPARSER *snparser_alloc(void);
  * 
  * Parameters:
  * 
- *   pParser - the parser object to free
+ *   pParser - the parser object to free or NULL
  */
 void snparser_free(SNPARSER *pParser);
 
@@ -186,8 +426,7 @@ void snparser_free(SNPARSER *pParser);
  * the results of the operation.  See the structure documentation for
  * further information.
  * 
- * pIn is the input file to read from.  It must be open for reading.
- * Reading is sequential.
+ * pIn is the input source to read from.
  * 
  * Once an error is encountered, the parser object will return that same
  * error each time this function is called without doing anything
@@ -203,9 +442,12 @@ void snparser_free(SNPARSER *pParser);
  * 
  *   pEntity - pointer to the entity to receive the results
  * 
- *   pIn - the input file
+ *   pIn - the input source
  */
-void snparser_read(SNPARSER *pParser, SNENTITY *pEntity, FILE *pIn);
+void snparser_read(
+    SNPARSER * pParser,
+    SNENTITY * pEntity,
+    SNSOURCE * pIn);
 
 /*
  * Return the current line count.
@@ -223,24 +465,6 @@ void snparser_read(SNPARSER *pParser, SNENTITY *pEntity, FILE *pIn);
  *   the current line count
  */
 long snparser_count(SNPARSER *pParser);
-
-/*
- * Check whether a UTF-8 Byte Order Mark was present at the start of
- * input.
- * 
- * This is only meaningful after the first entity has been read with a
- * call to snparser_read().  Before the first call to the read function,
- * the BOM flag is always clear because the file hasn't been read yet.
- * 
- * Parameter:
- * 
- *   pParser - the parser object
- * 
- * Return:
- * 
- *   non-zero if UTF-8 BOM was present, zero if not
- */
-int snparser_bomflag(SNPARSER *pParser);
 
 /*
  * Convert a Shastina SNERR_ error code into a string.
