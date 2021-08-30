@@ -1,7 +1,11 @@
 /*
  * shasm.c
+ * =======
  * 
- * Compile with shastina
+ * Read a Shastina file from standard input and write the parsed
+ * entities to standard output.
+ * 
+ * Compile with libshastina
  */
 
 #include "shastina.h"
@@ -9,22 +13,26 @@
 #include <string.h>
 
 /*
- * @@TODO:
+ * Program entrypoint
+ * ==================
  */
+
 int main(int argc, char *argv[]) {
   
   SNPARSER *pParser = NULL;
   SNENTITY ent;
-  int retval = 0;
   long ln = 0;
   
+  /* Allocate parser and clear entity structure */
   pParser = snparser_alloc();
   memset(&ent, 0, sizeof(SNENTITY));
   
+  /* Go through all entities until error */
   for(snparser_read(pParser, &ent, stdin);
       ent.status >= 0;
       snparser_read(pParser, &ent, stdin)) {
     
+    /* Print line number of entity */
     ln = snparser_count(pParser);
     if (ln < LONG_MAX) {
       printf("%ld: ", ln);
@@ -32,6 +40,7 @@ int main(int argc, char *argv[]) {
       printf("??: ");
     }
     
+    /* Report the different kinds of entities */
     if (ent.status == SNENTITY_EOF) {
       printf("End Of File\n");
       
@@ -99,16 +108,20 @@ int main(int argc, char *argv[]) {
       abort();
     }
     
+    /* Leave loop if EOF entity found */
     if (ent.status == SNENTITY_EOF) {
       break;
     }
   }
   if (ent.status != 0) {
-    fprintf(stderr, "Error %d!\n", retval);
+    /* Parsing error occurred */
+    fprintf(stderr, "Error: %s!\n", snerror_str(ent.status));
   }
   
+  /* Free the parser */
   snparser_free(pParser);
   pParser = NULL;
   
+  /* Return successfully */
   return 0;
 }
