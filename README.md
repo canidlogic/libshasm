@@ -1,8 +1,6 @@
 # Shastina Metainterpreter
 ## 1. Introduction
-The Shastina Metainterpreter (shastina) is an implementation of the Shastina metalanguage, which allows for the rapid implementation of special-purpose programming languages.
-
-Development work on this library is being handled by Noah Johnson (canidlogic on GitHub).  He can be reached by email at noah.johnson@loupmail.com
+The Shastina Metainterpreter (libshastina) is an implementation of the Shastina metalanguage, which allows for the rapid implementation of special-purpose programming languages.
 
 ## 2. Known issues
 ### 2.1 Line numbers in embedded data
@@ -11,15 +9,11 @@ This issue only affects clients that make use of embedded data.  Embedded data w
 ### 2.2 Missing documentation
 Some comments in the source code still need to be written, but more importantly there needs to be a rewrite of the Shastina Specification.  The current specification draft (3V:C4-5; March 9, 2018, available separately) does not match the Shastina language as implemented by the current library.
 
-## 3. Missing features
-The core Shastina interpreter is now complete.  However, a utility module with the following useful functionality needs to be added to the distribution:
+## 3. Releases
 
-* **Dictionary object** used for translating predefined strings to numeric codes.
-* **Numeric parsing** to help with translating text representations into numbers.
+### 0.9.1 (beta)
 
-These will be added as separate modules in future releases.  Although not required by the core parser, these utility features address common client implementation issues.
-
-## 4. Releases
+Small update on the version 0.9.0 that is fully backwards compatible.  Fixes an issue that causes a fault when the library tries to read an empty input file, and also adds an error string function.  Otherwise the same as the previous version, and can be used as a drop-in replacement.
 
 ### 0.9.0 (beta)
 
