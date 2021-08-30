@@ -1,15 +1,21 @@
 # Shastina Metainterpreter
-## 1. Introduction
 The Shastina Metainterpreter (libshastina) is an implementation of the Shastina metalanguage, which allows for the rapid implementation of special-purpose programming languages.
 
-## 2. Known issues
-### 2.1 Line numbers in embedded data
-This issue only affects clients that make use of embedded data.  Embedded data will work, except there is currently no way for the client to inform Shastina how many line breaks were present in the embedded data, so the line numbers reported by Shastina may be wrong after embedded data.  Apart from the faulty line numbers after embedded data, everything else should work.
+## Manifest
 
-### 2.2 Missing documentation
-Some comments in the source code still need to be written, but more importantly there needs to be a rewrite of the Shastina Specification.  The current specification draft (3V:C4-5; March 9, 2018, available separately) does not match the Shastina language as implemented by the current library.
+The Shastina metalanguage is specified in `shastina_spec.md`.  See that document for further information about Shastina.
 
-## 3. Releases
+The whole Shastina parsing library is contained in just the `shastina.c` and `shastina.h` source files.
+
+A test program is provided as `shasm.c`.  See the source code in that program for an example of how to use the Shastina library.
+
+## Releases
+
+### 0.9.2 (beta)
+
+Added a new input source architecture.  Added requirement for UTF-8 input and added built-in Unicode support.  Dropped embedded data feature, which was never used in practice and had implementation difficulties.  Added a completed language specification.
+
+This release is __not__ backwards-compatible with earlier betas.  Use beta 0.9.1 if you are compiling a program that is written against a previous Shastina beta that doesn't use the new input source architecture.
 
 ### 0.9.1 (beta)
 
