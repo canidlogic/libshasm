@@ -242,4 +242,26 @@ long snparser_count(SNPARSER *pParser);
  */
 int snparser_bomflag(SNPARSER *pParser);
 
+/*
+ * Convert a Shastina SNERR_ error code into a string.
+ * 
+ * The string has the first letter capitalized, but no punctuation or
+ * line break at the end.
+ * 
+ * If the code is not one of the recognized SNERR_ codes, then the
+ * message "Unknown error" is returned.
+ * 
+ * The returned string is statically allocated, and should not be freed
+ * by the client.
+ * 
+ * Parameters:
+ * 
+ *   code - the error code
+ * 
+ * Return:
+ * 
+ *   an error message
+ */
+const char *snerror_str(int code);
+
 #endif
