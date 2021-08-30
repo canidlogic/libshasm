@@ -3184,3 +3184,107 @@ int snparser_bomflag(SNPARSER *pParser) {
   /* Return BOM flag */
   return snfilter_bomflag(&(pParser->filter));
 }
+
+/*
+ * snerror_str function.
+ */
+const char *snerror_str(int code) {
+  
+  const char *pResult = NULL;
+  
+  switch (code) {
+    
+    case SNERR_IOERR:
+      pResult = "I/O error";
+      break;
+    
+    case SNERR_EOF:
+      pResult = "Unexpected end of file";
+      break;
+    
+    case SNERR_BADSIG:
+      pResult = "Unrecognized file signature";
+      break;
+    
+    case SNERR_OPENSTR:
+      pResult = "File ends in middle of string";
+      break;
+    
+    case SNERR_LONGSTR:
+      pResult = "String is too long";
+      break;
+    
+    case SNERR_NULLCHR:
+      pResult = "Nul character encountered in string";
+      break;
+    
+    case SNERR_DEEPCURLY:
+      pResult = "Too much curly nesting in string";
+      break;
+    
+    case SNERR_BADCHAR:
+      pResult = "Illegal character encountered";
+      break;
+    
+    case SNERR_LONGTOKEN:
+      pResult = "Token is too long";
+      break;
+      
+    case SNERR_TRAILER:
+      pResult = "Content present after |; token";
+      break;
+    
+    case SNERR_DEEPARRAY:
+      pResult = "Too much array nesting";
+      break;
+    
+    case SNERR_METANEST:
+      pResult = "Nested metacommands";
+      break;
+    
+    case SNERR_SEMICOLON:
+      pResult = "Semicolon used outside of metacommand";
+      break;
+    
+    case SNERR_DEEPGROUP:
+      pResult = "Too much group nesting";
+      break;
+    
+    case SNERR_RPAREN:
+      pResult = "Right parenthesis outside of group";
+      break;
+    
+    case SNERR_RSQR:
+      pResult = "Right square bracket outside array";
+      break;
+    
+    case SNERR_OPENGROUP:
+      pResult = "Open group";
+      break;
+
+    case SNERR_LONGARRAY:
+      pResult = "Array has too many elements";
+      break;
+    
+    case SNERR_METAEMBED:
+      pResult = "Embedded data in metacommand";
+      break;
+    
+    case SNERR_OPENMETA:
+      pResult = "Unclosed metacommand";
+      break;
+    
+    case SNERR_OPENARRAY:
+      pResult = "Unclosed array";
+      break;
+    
+    case SNERR_COMMA:
+      pResult = "Comma used outside of array or meta";
+      break;
+    
+    default:
+      pResult = "Unknown error";
+  }
+  
+  return pResult;
+}
