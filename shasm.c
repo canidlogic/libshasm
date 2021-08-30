@@ -20,17 +20,19 @@
 int main(int argc, char *argv[]) {
   
   SNPARSER *pParser = NULL;
+  SNSOURCE *pSrc = NULL;
   SNENTITY ent;
   long ln = 0;
   
-  /* Allocate parser and clear entity structure */
+  /* Open input source, allocate parser, and clear entity structure */
+  pSrc = snsource_file(stdin, 0);
   pParser = snparser_alloc();
   memset(&ent, 0, sizeof(SNENTITY));
   
   /* Go through all entities until error */
-  for(snparser_read(pParser, &ent, stdin);
+  for(snparser_read(pParser, &ent, pSrc);
       ent.status >= 0;
-      snparser_read(pParser, &ent, stdin)) {
+      snparser_read(pParser, &ent, pSrc)) {
     
     /* Print line number of entity */
     ln = snparser_count(pParser);
@@ -53,9 +55,6 @@ int main(int argc, char *argv[]) {
         /* Unknown string type */
         abort();
       }
-      
-    } else if (ent.status == SNENTITY_EMBEDDED) {
-      printf("Embedded (%s)\n", ent.pKey);
       
     } else if (ent.status == SNENTITY_BEGIN_META) {
       printf("Begin metacommand\n");
@@ -122,6 +121,15 @@ int main(int argc, char *argv[]) {
   snparser_free(pParser);
   pParser = NULL;
   
-  /* Return successfully */
+  /* If we stopped on EOF token, consume remaining data to make sure
+   * nothing remains after the |; token in input */
+  if (ent.status == 0) {
+    if (snsource_consume(pSrc) < 1) {
+      fprintf(stderr, "Failed to consume remaining data!\n");
+    }
+  }
+  
+  /* Free the input source and return */
+  snsource_free(pSrc);
   return 0;
 }
