@@ -1989,10 +1989,12 @@ static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
         c = snfilter_read(pFilter, pIn));
     
     /* If we encountered anything except the pound sign, set pushback
-     * mode and leave the loop */
+     * mode (unless a special condition) and leave the loop */
     if (c != ASCII_POUNDSIGN) {
-      if (!snfilter_pushback(pFilter)) {
-        abort();  /* shouldn't happen */
+      if (c >= 0) {
+        if (!snfilter_pushback(pFilter)) {
+          abort();  /* shouldn't happen */
+        }
       }
       break;
     }
