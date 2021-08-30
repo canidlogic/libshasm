@@ -31,7 +31,6 @@
 #define ASCII_LSQR      (0x5b)  /* [ */
 #define ASCII_BACKSLASH (0x5c)  /* \ */
 #define ASCII_RSQR      (0x5d)  /* ] */
-#define ASCII_GRACCENT  (0x60)  /* ` */
 #define ASCII_LCURL     (0x7b)  /* { */
 #define ASCII_BAR       (0x7c)  /* | */
 #define ASCII_RCURL     (0x7d)  /* } */
@@ -39,6 +38,21 @@
 /* Visible printing characters */
 #define ASCII_VISIBLE_MIN (0x21)
 #define ASCII_VISIBLE_MAX (0x7e)
+
+/*
+ * Unicode constants.
+ */
+#define UNICODE_MAX_CPV          (0x10ffffL)
+#define UNICODE_MIN_SUPPLEMENTAL (0x10000L)
+
+#define UNICODE_MIN_SURROGATE    (0xd800L)
+#define UNICODE_MAX_SURROGATE    (0xdfffL)
+
+#define UNICODE_MIN_HI_SUR       (0xd800L)
+#define UNICODE_MAX_HI_SUR       (0xdbffL)
+
+#define UNICODE_MIN_LO_SUR       (0xdc00L)
+#define UNICODE_MAX_LO_SUR       (0xdfffL)
 
 /*
  * The bytes of the UTF-8 Byte Order Mark (BOM).
@@ -53,7 +67,6 @@
 #define SNTOKEN_FINAL  (0)  /* The final |; token */
 #define SNTOKEN_SIMPLE (1)  /* Simple tokens, except |; */
 #define SNTOKEN_STRING (2)  /* Quoted and curly string tokens */
-#define SNTOKEN_EMBED  (3)  /* Embedded tokens */
 
 /*
  * The maximum number of queued entities.
@@ -73,6 +86,9 @@
  * of SNREADER_KEY_MAX.
  * 
  * See snbuffer_init() for further information about these values.
+ * 
+ * Note that these sizes refer to bytes in the UTF-8 encoding of keys,
+ * not to the number of codepoints.
  */
 #define SNREADER_KEY_INIT (16)
 #define SNREADER_KEY_MAX  (65535)
@@ -86,35 +102,148 @@
  * SNREADER_VAL_MAX.
  * 
  * See snbuffer_init() for further information about these values.
+ * 
+ * Note that these sizes refer to bytes in the UTF-8 encoding of string
+ * data, not to the number of codepoints.
  */
 #define SNREADER_VAL_INIT (256)
 #define SNREADER_VAL_MAX  (65535)
 
 /*
- * The initial and maximum allocations of the reader's array stack, in
- * longs.
+ * The initial and maximum allocations of the reader's array and group
+ * stacks, in longs.
  * 
  * This affects how deeply arrays can be nested.  At first, it will be
- * allocated at size SNREADER_ARRAY_INIT.  It can grow up to a maximum
- * of SNREADER_ARRAY_MAX.
+ * allocated at size SNREADER_AGSTACK_INIT.  It can grow up to a maximum
+ * of SNREADER_AGSTACK_MAX.
  * 
  * See snstack_init() for further information about these values.
+ * 
+ * (The group stack technically is one element taller than the array
+ * stack regularly, but we don't worry about that here.)
  */
-#define SNREADER_ARRAY_INIT (8)
-#define SNREADER_ARRAY_MAX (1024)
+#define SNREADER_AGSTACK_INIT (8)
+#define SNREADER_AGSTACK_MAX (1024)
 
 /*
- * The initial and maximum allocations of the reader's group stack, in
- * longs.
+ * Structure for storing an input source.
  * 
- * This affects how deeply arrays can be nested.  At first, it will be
- * allocated at size SNREADER_GROUP_INIT.  It can grow up to a maximum
- * of SNREADER_GROUP_MAX.
+ * Use the snsource_ functions to manipulate this structure.
  * 
- * See snstack_init() for further information about these values.
+ * The prototype of this structure (SNSOURCE) is defined in the header.
  */
-#define SNREADER_GROUP_INIT (8)
-#define SNREADER_GROUP_MAX (1024)
+struct SNSOURCE_TAG {
+  
+  /*
+   * Function pointer to the function that is used to read a character
+   * from input.
+   * 
+   * This must be present, and may not be NULL.
+   * 
+   * The void pointer parameter is a custom parameter that is stored as
+   * the pCustom field in this SNSOURCE structure and always passed
+   * through to the function.
+   * 
+   * The function should read a byte from input and return the unsigned
+   * byte value, in range [0, 255].  If there are no more bytes to read,
+   * return SNERR_EOF to indicate EOF.  If there was an I/O error trying
+   * to read a byte from input, return SNERR_IOERR to indicate I/O
+   * error.
+   * 
+   * Once the callback has returned SNERR_EOF or SNERR_IOERR, the status
+   * field of the source object will be set and all further calls to
+   * read from the source will return the same value as the last call
+   * without calling through to this callback function.
+   * 
+   * Parameters:
+   * 
+   *   (void *) - the custom data parameter that is passed through to
+   *   the function from the pCustom field of the SNSOURCE structure
+   * 
+   * Return:
+   * 
+   *   the unsigned byte value of the byte that was read, or SNERR_EOF
+   *   or SNERR_IOERR
+   */
+  int (*pfRead)(void *);
+  
+  /*
+   * Function pointer to an optional destructor function.
+   * 
+   * This may be NULL, in which case there is no destructor routine.
+   * 
+   * If a destructor routine is defined with this field, then the
+   * destructor will be called exactly once with the value of the
+   * pCustom field in this SNSOURCE structure immediately before the
+   * SNSOURCE structure is released.
+   * 
+   * This allows the custom data stored in this structure to be released
+   * when the source is released.
+   * 
+   * Parameters:
+   * 
+   *   (void *) - the custom data parameter that is stored in the
+   *   pCustom field of this SNSOURCE structure
+   */
+  void (*pfDestruct)(void *);
+  
+  /*
+   * The total number of (unfiltered) bytes that have been read through
+   * this source object, not including any EOF or I/O error returns.
+   * 
+   * If this is LONG_MAX, then the total number of bytes read has
+   * exceeded the range of a long.
+   */
+  long read_count;
+  
+  /*
+   * The current status of this source object.
+   * 
+   * This is zero initially, which means that calls to read from the
+   * source will call through to the function pointer stored in pfRead.
+   * 
+   * When pfRead returns a value of SNERR_EOF or SNERR_IOERR, then that
+   * return value will be stored in this status field before it is
+   * returned.  All further calls to read from this source will simply
+   * return the stored status value instead of calling through to the
+   * stored function pointer.
+   * 
+   * This may also be set to SNERR_UTF8 if UTF-8 decoding fails.
+   */
+  int status;
+  
+  /*
+   * Pointer to custom data.
+   * 
+   * This may be NULL if not required.
+   * 
+   * This value is passed through to the read callback defined by the
+   * pfRead function whenever the read callback is invoked.
+   * 
+   * This value is also passed through to the destructor routine defined
+   * by pfDestruct immediately before the SNSOURCE structure is
+   * released, if the destructor is defined.  This allows the custom
+   * data to be released when the source is released, though this is not
+   * required and may not be appropriate in all cases (such as when the
+   * custom data is a FILE * correpsonding to stdin).
+   */
+  void *pCustom;
+};
+
+/*
+ * Structure used for string reader source.
+ */
+typedef struct {
+  
+  /*
+   * The pointer to the string.
+   * 
+   * This is updated and advanced as the string is read until it reaches
+   * the terminating nul.
+   */
+  const unsigned char *pStr;
+  
+} SNSTRSRC;
 
 /*
  * Structure for storing state of Shastina numeric stacks.
@@ -133,7 +262,7 @@ typedef struct {
   /*
    * The number of longs stored in the buffer.
    * 
-   * This may not exceed cap.
+   * This may not exceed the cap limit.
    */
   long count;
   
@@ -178,34 +307,44 @@ typedef struct {
   char *pBuf;
   
   /*
-   * The number of characters (not including terminating null) stored in
-   * the buffer.
+   * The number of bytes (not including terminating null) stored in the
+   * buffer.
    * 
-   * This may not exceed cap.
+   * This may not exceed the cap limit.
+   * 
+   * Note that this counts bytes in the UTF-8 encoding, not Unicode
+   * codepoints.
    */
   long count;
   
   /*
-   * The current capacity of the buffer in characters.
+   * The current capacity of the buffer in bytes.
    * 
    * This includes space for the terminating null.
    * 
    * If zero, it means that no buffer has been allocated yet.
+   * 
+   * Note that this counts byte capacity for UTF-8 encoding, not Unicode
+   * codepoint capacity.
    */
   long cap;
   
   /*
-   * The initial allocation capacity for this buffer in characters.
+   * The initial allocation capacity for this buffer in bytes.
    * 
    * This must be greater than zero and no greater than maxcap.
+   * 
+   * Note that this counts bytes, not Unicode codepoints.
    */
   long initcap;
   
   /*
-   * The maximum capacity for this buffer in characters.
+   * The maximum capacity for this buffer in bytes.
    * 
    * This must be greater than or equal to initcap.  It may not exceed
    * (LONG_MAX / 2).
+   * 
+   * Note that this counts bytes, not Unicode codepoints.
    */
   long maxcap;
   
@@ -219,7 +358,7 @@ typedef struct {
 typedef struct {
   
   /*
-   * The line number of the character that was most recently read, or
+   * The line number of the codepoint that was most recently read, or
    * zero if no characters have been read yet.
    * 
    * Line numbers change *after* the line feed, so the line_count of an
@@ -232,20 +371,17 @@ typedef struct {
   long line_count;
   
   /*
-   * The character most recently read.
+   * The codepoint most recently read, or an error code.
    * 
-   * This is the unsigned value of the character (0-255).  It is only
-   * valid if line_count is greater than zero.  Otherwise, no characters
-   * have been read yet and this field is ignored.
+   * This field is only valid if line_count is greater than zero.
+   * Otherwise, nothing has been read yet and this field is ignored.
    * 
-   * The special values of SNERR_EOF and SNERR_IOERR mean End Of File or
-   * I/O error have been encountered, respectively.
+   * If a Unicode codepoint, it is in range [0, UNICODE_MAX_CPV] and NOT
+   * in range [UNICODE_MIN_SURROGATE, UNICODE_MAX_SURROGATE].
    * 
-   * SNERR_BADSIG means that the first character or the first two 
-   * characters of the file matched a UTF-8 Byte Order Mark (BOM), but
-   * a complete BOM could not be read.
+   * If it is less than zero, it is an SNERR_ code.
    */
-  int c;
+  long c;
   
   /*
    * The pushback flag.
@@ -253,27 +389,19 @@ typedef struct {
    * If zero, then pushback mode is not active.
    * 
    * If non-zero, it means pushback mode is active.  line_count must be
-   * greater than zero in this case, and c can not be EOF, IOERR, or
-   * BADSIG.  The next read operation will read the buffered character
-   * rather than the next character.
+   * greater than zero in this case, and c can not be an error code.
+   * The next read operation will read the buffered character rather
+   * than the next character.  Adjustment will also be made to the line
+   * count returned, although the line_count field remains unmodified.
    */
   int pushback;
-  
-  /*
-   * The Byte Order Mark (BOM) present flag.
-   * 
-   * If set, this means a UTF-8 Byte Order Mark (BOM) was present at the
-   * start of the file (and was filtered out).
-   */
-  int bom_present;
   
 } SNFILTER;
 
 /*
  * Structure for a token read from a Shastina source file.
  * 
- * This covers everything that can be found in a Shastina source file,
- * except for embedded data.
+ * This covers everything that can be found in a Shastina source file.
  */
 typedef struct {
   
@@ -299,12 +427,15 @@ typedef struct {
    * 
    * This will always be reset on read operations.  For SIMPLE and FINAL
    * token types, this buffer will contain the full token on return.
-   * For STRING and EMBED token types, this buffer will contain the
-   * prefix (excluding the opening quote, bracket, or accent) on return.
+   * For STRING token types, this buffer will contain the prefix
+   * (excluding the opening quote or bracket) on return.
    * 
    * The state of the buffer is undefined on error status returns.
    * 
    * The key and value buffer may not point to the same object.
+   * 
+   * Note that this pointer will be to a buffer within the SNREADER
+   * structure.  The buffer is not owned by this structure.
    */
   SNBUFFER *pKey;
   
@@ -318,6 +449,9 @@ typedef struct {
    * The state of the buffer is undefined on error status returns.
    * 
    * The key and value buffer may not point to the same object.
+   * 
+   * Note that this pointer will be to a buffer within the SNREADER
+   * structure.  The buffer is not owned by this structure.
    */
   SNBUFFER *pValue;
   
@@ -384,6 +518,9 @@ typedef struct {
    * 
    * This needs to be properly initialized.  It also needs to be fully
    * reset before the structure is released.
+   * 
+   * The numeric value on top of the stack counts the number of array
+   * elements.
    */
   SNSTACK stack_array;
   
@@ -392,6 +529,14 @@ typedef struct {
    * 
    * This needs to be properly initialized.  It also needs to be fully
    * reset before the structure is released.
+   * 
+   * The numeric value on top of the stack counts the number of open
+   * groups.  Array elements implicitly open special groups that can
+   * only be closed at the end of an array element.  Hence the need for
+   * a stack to track open groups.
+   * 
+   * The height of this stack is regularly one greater than the height
+   * of the array stack.
    */
   SNSTACK stack_group;
   
@@ -439,6 +584,19 @@ struct SNPARSER_TAG {
 };
 
 /* Function prototypes */
+static long snutf_pair(long hi, long lo);
+static int snutf_count(int c);
+static long snutf_decode(const unsigned char *pc);
+static void snutf_encode(long cpv, unsigned char *pb);
+
+static int snsource_file_read(void *pCustom);
+static void snsource_file_free(void *pCustom);
+static int snsource_str_read(void *pCustom);
+static void snsource_str_free(void *pCustom);
+
+static int snsource_read(SNSOURCE *pIn);
+static long snsource_readCPV(SNSOURCE *pIn);
+
 static void snstack_init(SNSTACK *pStack, long icap, long maxcap);
 static void snstack_reset(SNSTACK *pStack, int full);
 static int snstack_push(SNSTACK *pStack, long v);
@@ -450,49 +608,51 @@ static long snstack_count(SNSTACK *pStack);
 
 static void snbuffer_init(SNBUFFER *pBuffer, long icap, long maxcap);
 static void snbuffer_reset(SNBUFFER *pBuffer, int full);
-static int snbuffer_append(SNBUFFER *pBuffer, int c);
+static int snbuffer_appendByte(SNBUFFER *pBuffer, int c);
+static int snbuffer_append(SNBUFFER *pBuffer, long cpv);
 static char *snbuffer_get(SNBUFFER *pBuffer);
-static long snbuffer_count(SNBUFFER *pBuffer);
-static int snbuffer_last(SNBUFFER *pBuffer);
+static long snbuffer_last(SNBUFFER *pBuffer);
 static int snbuffer_less(SNBUFFER *pBuffer);
 
 static void snfilter_reset(SNFILTER *pFilter);
-static int snfilter_read(SNFILTER *pFilter, FILE *pIn);
+static long snfilter_read(SNFILTER *pFilter, SNSOURCE *pIn);
 static long snfilter_count(SNFILTER *pFilter);
-static int snfilter_bomflag(SNFILTER *pFilter);
 static int snfilter_pushback(SNFILTER *pFilter);
 
-static int snchar_islegal(int c);
-static int snchar_isatomic(int c);
-static int snchar_isinclusive(int c);
-static int snchar_isexclusive(int c);
+static int snchar_islegal(long c);
+static int snchar_isatomic(long c);
+static int snchar_isinclusive(long c);
+static int snchar_isexclusive(long c);
 static int snchar_strequals(int c, const char *pStr);
 static int snchar_strequals2(int c1, int c2, const char *pStr);
 
 static int snstr_readQuoted(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter);
 
 static int snstr_readCurlied(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter);
 
-static void sntk_skip(FILE *pIn, SNFILTER *pFilter);
+static void sntk_skip(SNSOURCE *pIn, SNFILTER *pFilter);
 static int sntk_readToken(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter);
 
-static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil);
+static void sntoken_read(
+    SNTOKEN  * pToken,
+    SNSOURCE * pIn,
+    SNFILTER * pFil);
 
 static void snreader_init(SNREADER *pReader);
 static void snreader_reset(SNREADER *pReader, int full);
 static void snreader_read(
     SNREADER * pReader,
     SNENTITY * pEntity,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter);
 
 static void snreader_addEntityZ(SNREADER *pReader, int entity);
@@ -514,8 +674,663 @@ static void snreader_addEntityT(
 static void snreader_arrayPrefix(SNREADER *pReader);
 static void snreader_fill(
     SNREADER * pReader,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter);
+
+/*
+ * Given a high surrogate and a low surrogate, return the supplemental
+ * codepoint that the pair selects.
+ * 
+ * A fault occurs if hi is not in high surrogate range or lo is not in
+ * low surrogate range.
+ * 
+ * Parameters:
+ * 
+ *   hi - the high surrogate
+ * 
+ *   lo - the low surrogate
+ * 
+ * Return:
+ * 
+ *   the supplemental codepoint
+ */
+static long snutf_pair(long hi, long lo) {
+  
+  long result = 0;
+  
+  /* Check parameters */
+  if ((hi < UNICODE_MIN_HI_SUR) || (hi > UNICODE_MAX_HI_SUR) ||
+      (lo < UNICODE_MIN_LO_SUR) || (lo > UNICODE_MAX_LO_SUR)) {
+    abort();
+  }
+  
+  /* Convert hi and lo into offsets within their surrogate ranges */
+  hi = hi - UNICODE_MIN_HI_SUR;
+  lo = lo - UNICODE_MIN_LO_SUR;
+  
+  /* Combine hi and lo with bit shifting */
+  result = (hi << 10) | lo;
+  
+  /* Use as offset into surrogate range */
+  result = result + UNICODE_MIN_SUPPLEMENTAL;
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Check a byte within a UTF-8 encoding to determine how many bytes long
+ * the encoding is.
+ * 
+ * c is the unsigned byte value to check.  It must be in range [0, 255].
+ * 
+ * The return value is one if the most significant bit of the byte is
+ * clear (indicating an ASCII character), two to four if the given byte
+ * is a UTF-8 lead byte, zero if the byte is a UTF-8 continuation byte,
+ * and -1 if the byte is not a valid UTF-8 byte.
+ * 
+ * If a value greater than zero is returned, then the whole encoded
+ * codepoint (including the leading byte) has that many bytes in it,
+ * where any bytes after the first are continuation bytes.
+ * 
+ * Parameters:
+ * 
+ *   c - the byte value to check
+ * 
+ * Return:
+ * 
+ *   the number of bytes in the encoded codepoint, or zero if the given
+ *   byte is a continuation byte, or -1 if the byte is not valid UTF-8
+ */
+static int snutf_count(int c) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if ((c < 0) || (c > 255)) {
+    abort();
+  }
+  
+  /* Determine result */
+  if (c <= 127) {
+    /* Everything in [0, 127] has one byte */
+    result = 1;
+  
+  } else if ((c & 0xC0) == 0x80) {
+    /* 10?????? bytes are continuation bytes */
+    result = 0;
+    
+  } else if ((c & 0xE0) == 0xC0) {
+    /* 110????? bytes are lead bytes for two-byte encodings */
+    result = 2;
+    
+  } else if ((c & 0xF0) == 0xE0) {
+    /* 1110???? bytes are lead bytes for three-byte encodings */
+    result = 3;
+    
+  } else if ((c & 0xF8) == 0xF0) {
+    /* 11110??? bytes are lead bytes for four-byte encodings */
+    result = 4;
+    
+  } else {
+    /* Everything else is invalid UTF-8 */
+    result = -1;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Decode a UTF-8 codepoint.
+ * 
+ * pc points to the start of an encoded UTF-8 codepoint.  Encoded UTF-8
+ * codepoints may have from one to four bytes for a codepoint.  This
+ * function will stop immediately and return an error if it encounters
+ * a faulty encoding, and it is guaranteed safe to use on nul-terminated
+ * strings, even if the strings have bad UTF-8 encodings.  (It will
+ * never read beyond the terminating nul, even if the terminating nul
+ * comes unexpectedly in the middle of an encoded UTF-8 codepoint.)
+ * 
+ * The leading byte pointed to by pc determines how many bytes are in
+ * the encoding.  You can use snutf_count() to get this information
+ * given a byte value.  Encodings that have more than one byte will have
+ * all bytes after the first byte be continuation bytes.
+ * 
+ * This function will check for and fail on overlong encodings -- that
+ * is, encodings of codepoints that are unnecessarily long.  These are
+ * blocked for security reasons, and should never occur in valid streams
+ * of UTF-8.
+ * 
+ * This function allows surrogates to be decoded, even though surrogates
+ * aren't supposed to be used in UTF-8.  Surrogates need to be resolved
+ * by looking at more than one codepoint at a time, so they can't be
+ * handled properly by this function.
+ * 
+ * Parameters:
+ * 
+ *   pc - pointer to the UTF-8 codepoint
+ * 
+ * Return:
+ * 
+ *   a Unicode codepoint (including surrogates!), or -1 if the UTF-8
+ *   encoding wasn't valid
+ */
+static long snutf_decode(const unsigned char *pc) {
+  
+  int status = 1;
+  int ec = 0;
+  int x = 0;
+  long result = 0;
+  
+  /* Check parameter */
+  if (pc == NULL) {
+    abort();
+  }
+  
+  /* Determine encoded length */
+  ec = snutf_count(*pc);
+  if (ec < 1) {
+    /* If start of encoding is a continuation byte or not a valid UTF-8
+     * byte, fail */
+    status = 0;
+  }
+  
+  /* If there is more than one byte in the encoding, make sure all
+   * additional bytes are continuation bytes */
+  if (status) {
+    for(x = 1; x < ec; x++) {
+      if (snutf_count(pc[x]) != 0) {
+        status = 0;
+        break;
+      }
+    }
+  }
+  
+  /* All UTF-8 bytes are available and of the correct type, so begin by
+   * getting the payload of the lead byte */
+  if (status) {
+    switch (ec) {
+      case 1:
+        /* For one-byte codes, the byte value is equal to the code */
+        result = pc[0];
+        break;
+      
+      case 2:
+        /* For two-byte codes, lead byte payload is ---PPPPP */
+        result = (pc[0] & 0x1F);
+        break;
+      
+      case 3:
+        /* For three-byte codes, lead byte payload is ----PPPP */
+        result = (pc[0] & 0x0F);
+        break;
+      
+      case 4:
+        /* For four-byte codes, lead byte payload is -----PPP */
+        result = (pc[0] & 0x07);
+        break;
+      
+      default:
+        /* Shouldn't happen */
+        abort();
+    }
+  }
+  
+  /* Include the payload from any continuation bytes -- continuation
+   * byte payload is --PPPPPP */
+  if (status) {
+    for(x = 1; x < ec; x++) {
+      result = (result << 6) | (pc[x] & 0x3F);
+    }
+  }
+  
+  /* Fail for any overlong encodings */
+  if (status) {
+    switch (ec) {
+      case 1:
+        /* One-byte encodings are never overlong */
+        break;
+      
+      case 2:
+        /* Two-byte encodings must be at least U+0080 */
+        if (result < 0x80L) {
+          status = 0;
+        }
+        break;
+      
+      case 3:
+        /* Three-byte encodings must be at least U+0800 */
+        if (result < 0x800L) {
+          status = 0;
+        }
+        break;
+      
+      case 4:
+        /* Four-byte encodings must be at least U+10000 */
+        if (result < 0x10000L) {
+          status = 0;
+        }
+        break;
+      
+      default:
+        /* Shouldn't happen */
+        abort();
+    }
+  }
+  
+  /* If we failed, set result to -1 */
+  if (!status) {
+    result = -1;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Encode a Unicode codepoint into UTF-8.
+ * 
+ * The given codepoint must be in [0, UNICODE_MAX_CPV] range.  Also, it
+ * must NOT be in [UNICODE_MIN_SURROGATE, UNICODE_MAX_SURROGATE] range.
+ * 
+ * pb points to the buffer to write the encoded codepoint into.  This
+ * function will write from one to four bytes into the buffer.  Make
+ * sure there is enough room in the buffer for the encoded codepoint!
+ * 
+ * One way of handling the buffer is to allocate a buffer of five
+ * characters, initialize all the characters to nul, and then call this
+ * function on the buffer.  After this function returns, then, the
+ * result will be nul-terminated (except if the given codepoint is zero,
+ * in which case the result will be empty).
+ * 
+ * Parameters:
+ * 
+ *   cpv - the Unicode codepoint
+ * 
+ *   pb - the buffer to write the result into
+ */
+static void snutf_encode(long cpv, unsigned char *pb) {
+  
+  int ec = 0;
+  int c = 0;
+  int i = 0;
+  
+  /* Check parameters */
+  if (pb == NULL) {
+    abort();
+  }
+  if ((cpv < 0) || (cpv > UNICODE_MAX_CPV) ||
+        ((cpv >= UNICODE_MIN_SURROGATE) &&
+          (cpv <= UNICODE_MAX_SURROGATE))) {
+    abort();
+  }
+  
+  /* From the codepoint value, figure out the encoded length of the
+   * codepoint */
+  if (cpv < 0x80L) {
+    /* U+0000 to 0+007F has one-byte encodings */
+    ec = 1;
+  
+  } else if (cpv < 0x800L) {
+    /* U+0080 to U+07FF has two-byte encodings */
+    ec = 2;
+    
+  } else if (cpv < 0x10000L) {
+    /* U+0800 to U+FFFF has three-byte encodings */
+    ec = 3;
+    
+  } else if (cpv <= UNICODE_MAX_CPV) {
+    /* U+10000 to end of Unicode range has four-byte encodings */
+    ec = 4;
+    
+  } else {
+    /* Shouldn't happen */
+    abort();
+  }
+  
+  /* Align the cpv by left shifting so that everything has payload bits
+   * for three continuation bytes; that is, for one-byte codes, add
+   * 18 (= 6 x 3) bits; for two-byte codes, add 12 (= 6 x 2) bits; for
+   * three-byte codes, add 6 bits; and nothing for four-byte codes,
+   * which already have three continuation bytes */
+  if (ec == 1) {
+    cpv = cpv << 18;
+  
+  } else if (ec == 2) {
+    cpv = cpv << 12;
+    
+  } else if (ec == 3) {
+    cpv = cpv << 6;
+  }
+  
+  /* Lead byte payload is now always 18 bits shifted, so combine it with
+   * the appropriate marker bits and write the first encoded byte */
+  c = (int) (cpv >> 18);
+  
+  if (ec == 2) {
+    c = c | 0xC0;
+  
+  } else if (ec == 3) {
+    c = c | 0xE0;
+    
+  } else if (ec == 4) {
+    c = c | 0xF0;
+  }
+  
+  *pb = (unsigned char) c;
+  pb++;
+  
+  /* Mask out the lead byte payload, leaving just the continuation byte
+   * payloads */
+  cpv = cpv & 0x3ffffL;
+  
+  /* Write any continuation bytes */
+  for(i = 1; i < ec; i++) {
+    /* Get most significant continuation payload */
+    c = (int) (cpv >> 12);
+    
+    /* Add continuation marker bit */
+    c = c | 0x80;
+    
+    /* Output continuation byte */
+    *pb = (unsigned char) c;
+    pb++;
+    
+    /* Mask out most significant continuation payload */
+    cpv = cpv & 0xfffL;
+    
+    /* Shift continuation payloads left */
+    cpv = cpv << 6;
+  }
+}
+
+/*
+ * Reading callback for a stdio FILE * source.
+ * 
+ * The function prototype matches pfRead in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static int snsource_file_read(void *pCustom) {
+  
+  FILE *pIn = NULL;
+  int result = 0;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to a FILE * handle */
+  pIn = (FILE *) pCustom;
+  
+  /* Read from the file and check for EOF and I/O error conditions */
+  result = getc(pIn);
+  if (result == EOF) {
+    if (feof(pIn)) {
+      result = SNERR_EOF;
+    } else {
+      result = SNERR_IOERR;
+    }
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Destructor callback for a stdio FILE * source.
+ * 
+ * The function prototype matches pfDestruct in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static void snsource_file_free(void *pCustom) {
+  
+  FILE *pIn = NULL;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to a FILE * handle */
+  pIn = (FILE *) pCustom;
+  
+  /* Close the file */
+  fclose(pIn);
+}
+
+/*
+ * Reading callback for a string source.
+ * 
+ * The function prototype matches pfRead in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static int snsource_str_read(void *pCustom) {
+  
+  SNSTRSRC *pStS = NULL;
+  int c = 0;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to the string handling structure */
+  pStS = (SNSTRSRC *) pCustom;
+  
+  /* Get current character */
+  c = *(pStS->pStr);
+  
+  /* If current character is not nul, then advance pointer; else, set
+   * return to EOF condition and don't advance pointer */
+  if (c != 0) {
+    (pStS->pStr)++;
+  } else {
+    c = SNERR_EOF;
+  }
+  
+  /* Return the character or EOF */
+  return c;
+}
+
+/*
+ * Destructor callback for a string source.
+ * 
+ * The function prototype matches pfDestruct in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static void snsource_str_free(void *pCustom) {
+  
+  SNSTRSRC *pStS = NULL;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to the string handling structure */
+  pStS = (SNSTRSRC *) pCustom;
+  
+  /* Free the structure */
+  free(pStS);
+}
+
+/*
+ * Read a single byte from a source object.
+ * 
+ * The return value is an unsigned byte value in range [0, 255], or else
+ * SNERR_EOF or SNERR_IOERR.  SNERR_UTF8 is never generated by this
+ * function, but it may be returned because snsource_readCPV() may set
+ * the status of the source object to that error.
+ * 
+ * Clients are recommended to use snsource_readCPV() instead of directly
+ * using this function.
+ * 
+ * Parameters:
+ * 
+ *   pIn - the source to read from
+ * 
+ * Return:
+ * 
+ *   the next byte read, or SNERR_EOF if nothing remains in input
+ *   source, or SNERR_IOERR if there was an error reading the input
+ *   source, or SNERR_UTF8 if there was a previous UTF-8 decoding error
+ */
+static int snsource_read(SNSOURCE *pIn) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (pIn == NULL) {
+    abort();
+  }
+  
+  /* Determine first whether we have a special condition to return
+   * without invoking the callback */
+  if (pIn->status < 0) {
+    /* We have a special status code, so just use that */
+    result = pIn->status;
+    
+  } else {
+    /* No special status code, so we need to invoke the read callback;
+     * check first that the callback is defined */
+    if (pIn->pfRead == NULL) {
+      abort();
+    }
+    
+    /* Invoke the read callback */
+    result = (*(pIn->pfRead))(pIn->pCustom);
+    
+    /* Check range of returned result */
+    if (((result < 0) || (result > 255)) &&
+          (result != SNERR_EOF) && (result != SNERR_IOERR)) {
+      abort();
+    }
+    
+    /* If returned result was an unsigned byte value, increment the read
+     * count (unless it has overflown); otherwise, if it is a special
+     * return code, store it in status so we return it in future
+     * invocations */
+    if ((result >= 0) && (result <= 255)) {
+      if (pIn->read_count < LONG_MAX) {
+        (pIn->read_count)++;
+      }
+    } else {
+      pIn->status = result;
+    }
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * Read a UTF-8 encoded Unicode codepoint from a source object.
+ * 
+ * The return value is a Unicode codepoint [0, UNICODE_MAX_CPV], or else
+ * SNERR_EOF if end of source file, SNERR_IOERR if I/O error reading
+ * from source, or SNERR_UTF8 if error decoding UTF-8.
+ * 
+ * This function will only decode a single UTF-8 codepoint.  It will
+ * check for overlong encodings and invalid encodings, causing the
+ * SNERR_UTF8 error if such illegal encodings occur.
+ * 
+ * This function WILL successfully decode surrogate codepoints, even
+ * though surrogates aren't supposed to be used in UTF-8.  It is assumed
+ * that surrogate pairs will be properly decoded at a higher level.
+ * 
+ * Parameters:
+ * 
+ *   pIn - the source to read from
+ * 
+ * Return:
+ * 
+ *   the next codepoint read (including surrogates!), or SNERR_EOF if
+ *   nothing remains in input source, or SNERR_IOERR if there was an
+ *   error reading the input source, or SNERR_UTF8 if there was a UTF-8
+ *   decoding error
+ */
+static long snsource_readCPV(SNSOURCE *pIn) {
+  
+  unsigned char buf[5];
+  long result = 0;
+  int err_num = 0;
+  int c = 0;
+  int ec = 0;
+  int i = 0;
+  
+  /* Initialize buffer */
+  memset(buf, 0, 5);
+  
+  /* Check parameters */
+  if (pIn == NULL) {
+    abort();
+  }
+  
+  /* Get the next byte */
+  c = snsource_read(pIn);
+  
+  /* If we got a special status return, then result is that; otherwise,
+   * proceed */
+  if (c < 0) {
+    /* Special status return, so that will be the result */
+    result = c;
+  
+  } else {
+    /* We read a byte, so determine how many bytes in the encoded
+     * codepoint */
+    ec = snutf_count(c);
+    if (ec < 1) {
+      /* Not a valid first byte of an encoded codepoint, so fail */
+      err_num = SNERR_UTF8;
+    } else if (ec > 4) {
+      /* Shouldn't happen */
+      abort();
+    }
+    
+    /* Write the character we just read into the decoding buffer */
+    if (!err_num) {
+      buf[0] = (unsigned char) c;
+    }
+    
+    /* Read any additional bytes into the decoding buffer -- EOF returns
+     * will be changed to UTF-8 decoding errors */
+    if (!err_num) {
+      for(i = 1; i < ec; i++) {
+        c = snsource_read(pIn);
+        if (c < 0) {
+          if (c == SNERR_EOF) {
+            err_num = SNERR_UTF8;
+          } else {
+            err_num = c;
+          }
+          break;
+        } else {
+          buf[i] = (unsigned char) c;
+        }
+      }
+    }
+    
+    /* Decode the buffered character bytes into a codepoint */
+    if (!err_num) {
+      result = snutf_decode(buf);
+      if (result < 0) {
+        err_num = SNERR_UTF8;
+      }
+    }
+  }
+  
+  /* If error occurred, set result to error code and store error code in
+   * status field of source */
+  if (err_num) {
+    result = err_num;
+    pIn->status = err_num;
+  }
+  
+  /* Return result */
+  return result;
+}
 
 /*
  * Initialize a long stack.
@@ -892,8 +1707,9 @@ static long snstack_count(SNSTACK *pStack) {
  * using snbuffer_reset() before the structure is released or a memory
  * leak may occur.
  * 
- * icap is the initial allocation capacity in characters.  maxcap is the
- * maximum capacity for the buffer.
+ * icap is the initial allocation capacity in bytes.  maxcap is the
+ * maximum capacity in bytes for the buffer.  Note that the capacity
+ * counts bytes, not Unicode codepoints.
  * 
  * icap must be greater than zero, maxcap must be greater than or equal
  * to icap, and maxcap must be no greater than (LONG_MAX / 2) or a fault
@@ -994,17 +1810,20 @@ static void snbuffer_reset(SNBUFFER *pBuffer, int full) {
 }
 
 /*
- * Append a character to a string buffer.
+ * Append a byte value to a string buffer.
  * 
  * The character c may be any unsigned byte value except for zero.  That
  * is, the range is 1-255.
  * 
- * The function fails if there is no more capacity left for another
- * character.  The buffer is unmodified in this case.
+ * The function fails if there is no more capacity left for another 
+ * byte.  The buffer is unmodified in this case.
+ * 
+ * This is a low-level function.  Clients should use append() instead to
+ * work with Unicode codepoints.
  * 
  * Parameters:
  * 
- *   pBuffer - the string buffer to add a character to
+ *   pBuffer - the string buffer to add a byte to
  * 
  *   c - the unsigned byte value to add
  * 
@@ -1012,7 +1831,7 @@ static void snbuffer_reset(SNBUFFER *pBuffer, int full) {
  * 
  *   non-zero if successful, zero if no more capacity
  */
-static int snbuffer_append(SNBUFFER *pBuffer, int c) {
+static int snbuffer_appendByte(SNBUFFER *pBuffer, int c) {
   
   int status = 1;
   long newcap = 0;
@@ -1075,6 +1894,74 @@ static int snbuffer_append(SNBUFFER *pBuffer, int c) {
 }
 
 /*
+ * Append a Unicode codepoint to a string buffer.
+ * 
+ * cpv is the Unicode codepoint to append.  It must be greater than zero
+ * and no greater than UNICODE_MAX_CPV.  Furthermore, it may not be in
+ * surrogate range [UNICODE_MIN_SURROGATE, UNICODE_MAX_SURROGATE].
+ * 
+ * The codepoint will be encoded into UTF-8 and the bytes of the UTF-8
+ * encoding will be added to the string buffer.
+ * 
+ * The function fails if there is not enough capacity left for the full
+ * UTF-8 encoding of the codepoint.  The buffer is unmodified in this
+ * case.
+ * 
+ * Parameters:
+ * 
+ *   pBuffer - the string buffer to add a codepoint to
+ * 
+ *   cpv - the Unicode codepoint to add
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if not enough capacity
+ */
+static int snbuffer_append(SNBUFFER *pBuffer, long cpv) {
+  
+  int status = 1;
+  unsigned char buf[5];
+  unsigned char *pc = NULL;
+  int elen = 0;
+  
+  /* Initialize buffer to all nul */
+  memset(buf, 0, 5);
+  
+  /* Check parameters */
+  if (pBuffer == NULL) {
+    abort();
+  }
+  if ((cpv < 1) || (cpv > UNICODE_MAX_CPV) ||
+      ((cpv >= UNICODE_MIN_SURROGATE) &&
+        (cpv <= UNICODE_MAX_SURROGATE))) {
+    abort();
+  }
+  
+  /* Encode the codepoint and get the encoded length */
+  snutf_encode(cpv, buf);
+  elen = (int) strlen(buf);
+  
+  /* Make sure we have enough capacity for the all the bytes */
+  if (pBuffer->count >= (pBuffer->maxcap - elen)) {
+    status = 0;
+  }
+  
+  /* Add each of the bytes */
+  if (status) {
+    for(pc = buf; *pc != 0; pc++) {
+      if (!snbuffer_appendByte(pBuffer, *pc)) {
+        /* Shouldn't happen because we already checked that we have
+         * enough capacity remaining */
+        abort();
+      }
+    }
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
  * Get a pointer to the current string stored in the buffer.
  * 
  * The string will be null-terminated.  The returned pointer remains
@@ -1114,9 +2001,7 @@ static char *snbuffer_get(SNBUFFER *pBuffer) {
 }
 
 /*
- * Return the number of characters currently buffered.
- * 
- * This does not include the terminating null.
+ * Get the last Unicode codepoint in a buffer.
  * 
  * Parameters:
  * 
@@ -1124,42 +2009,46 @@ static char *snbuffer_get(SNBUFFER *pBuffer) {
  * 
  * Return:
  * 
- *   the number of buffered characters
+ *   the last Unicode codepoint, or zero if the buffer is empty
  */
-static long snbuffer_count(SNBUFFER *pBuffer) {
+static long snbuffer_last(SNBUFFER *pBuffer) {
+  
+  long c = 0;
+  unsigned char *pc = NULL;
+  int sw = 0;
   
   /* Check parameter */
   if (pBuffer == NULL) {
     abort();
   }
   
-  /* Return the count */
-  return pBuffer->count;
-}
-
-/*
- * Get the last character of a buffer.
- * 
- * Parameters:
- * 
- *   pBuffer - the buffer to query
- * 
- * Return:
- * 
- *   the last character, or zero if the buffer is empty
- */
-static int snbuffer_last(SNBUFFER *pBuffer) {
-  
-  int c = 0;
-  
-  /* Check parameter */
-  if (pBuffer == NULL) {
-    abort();
-  }
-  
-  /* Get last character if buffer not empty */
+  /* Get last codepoint if buffer not empty */
   if (pBuffer->count > 0) {
-    c = ((unsigned char *) pBuffer->pBuf)[pBuffer->count - 1];
+    
+    /* Find the last byte in the buffer that is not a continuation
+     * byte */
+    sw = 1;
+    for(pc = &(((unsigned char *) pBuffer->pBuf)[pBuffer->count - 1]);
+        snutf_count(*pc) == 0;
+        pc--) {
+      sw++;
+    }
+    
+    /* Get how many encoded bytes and make sure valid and matches how
+     * many bytes we moved back in the search */
+    if (snutf_count(*pc) != sw) {
+      /* Shouldn't happen because everything in buffer should be
+       * valid */
+      abort();
+    }
+    
+    /* Decode the last codepoint */
+    c = snutf_decode(pc);
+    if (c < 0) {
+      /* Shouldn't happen because everything in buffer should be
+       * valid */
+      abort();
+    }
   }
   
   /* Return character or zero */
@@ -1167,13 +2056,13 @@ static int snbuffer_last(SNBUFFER *pBuffer) {
 }
 
 /*
- * Remove the last character from the given buffer.
+ * Remove the last codepoint from the given buffer.
  * 
  * The function fails if the buffer is empty.
  * 
  * Parameters:
  * 
- *   pBuffer - the buffer to remove a character from
+ *   pBuffer - the buffer to remove a codepoint from
  * 
  * Return:
  * 
@@ -1182,6 +2071,7 @@ static int snbuffer_last(SNBUFFER *pBuffer) {
 static int snbuffer_less(SNBUFFER *pBuffer) {
   
   int status = 1;
+  unsigned char *pc = NULL;
   
   /* Check parameter */
   if (pBuffer == NULL) {
@@ -1190,8 +2080,16 @@ static int snbuffer_less(SNBUFFER *pBuffer) {
   
   /* Only proceed if not empty */
   if (pBuffer->count > 0) {
-    /* Remove a character from the buffer */
-    pBuffer->pBuf[pBuffer->count - 1] = (char) 0;
+    /* Remove any continuation bytes from the end of the buffer */
+    for(pc = &(((unsigned char *) pBuffer->pBuf)[pBuffer->count - 1]);
+        snutf_count(*pc) == 0;
+        pc--) {
+      *pc = (unsigned char) 0;
+      (pBuffer->count)--;
+    }
+    
+    /* Remove the last codepoint from the buffer */
+    *pc = (unsigned char) 0;
     (pBuffer->count)--;
     
   } else {
@@ -1226,161 +2124,104 @@ static void snfilter_reset(SNFILTER *pFilter) {
   pFilter->line_count = 0;
   pFilter->c = 0;
   pFilter->pushback = 0;
-  pFilter->bom_present = 0;
 }
 
 /*
- * Read the next character through the input filter.
+ * Read the next codepoint through the input filter.
  * 
- * The next character is returned as an unsigned byte value (0-255).
+ * The next codepoint value is in Unicode codepoint range, which is
+ * [0, UNICODE_MAX_CPV], excluding the surrogate characters, in range
+ * [UNICODE_MIN_SURROGATE, UNICODE_MAX_SURROGATE].
  * 
- * SNERR_EOF is returned if End Of File has been reached.
+ * CR+LF to LF conversion, UTF-8 Byte Order Mark (BOM) filtering, and
+ * correction of encoded surrogate pairs to supplemental codepoints are
+ * performed by this function.
  * 
- * SNERR_IOERR is returned if an I/O error has been encountered.
+ * SNERR_ codes are returned if there is an error.  These codes are
+ * always less than zero, so they are easy to distinguish from Unicode
+ * codepoints, which are always zero or greater.
  * 
- * SNERR_BADSIG is returned if one or two characters corresponding to 
- * the start of a UTF-8 Byte Order Mark (BOM) were read at the start of
- * the file, but the complete UTF-8 BOM could not be read.  The filter
- * will not continue reading the file in this case.
- * 
- * The provided input filter state must be properly initialized.  The
- * passed file must be open for reading.  It will be read sequentially.
+ * The provided input filter state must be properly initialized.
  * 
  * Parameters:
  * 
  *   pFilter - the input filter state
  * 
- *   pIn - the file to read from
+ *   pIn - the source to read from
  * 
  * Return:
  * 
- *   the next unsigned byte value, or SNERR_EOF, SNERR_IOERR, or
- *   SNERR_BADSIG
+ *   the next codepoint value, or an SNERR_ value that is less than zero
  */
-static int snfilter_read(SNFILTER *pFilter, FILE *pIn) {
+static long snfilter_read(SNFILTER *pFilter, SNSOURCE *pIn) {
   
   int err_num = 0;
-  int c = 0;
-  int c2 = 0;
+  long c = 0;
+  long c2 = 0;
   
   /* Check parameters */
   if ((pFilter == NULL) || (pIn == NULL)) {
     abort();
   }
   
-  /* If line_count is zero, this is the first time we're reading from
-   * the file, so check for a UTF-8 BOM and filter it out (setting the
-   * bom_present flag) if present */
-  if ((!err_num) && (pFilter->line_count == 0)) {
-    
-    /* Read the first character */
-    c = getc(pIn);
-    if (c == EOF) {
-      if (feof(pIn)) {
-        err_num = SNERR_EOF;
-      } else {
-        err_num = SNERR_IOERR;
-      }
-    }
-    
-    /* If the first character is the first character of a UTF-8 BOM,
-     * read and filter out the BOM; else, unread it and proceed */
-    if ((!err_num) && (c == SNFILTER_BOM_1)) {
-      /* We have a UTF-8 BOM; read the second character and confirm it's
-       * present and part of the BOM */
-      c = getc(pIn);
-      if (c == EOF) {
-        if (feof(pIn)) {
-          /* File ends before complete UTF-8 BOM */
-          err_num = SNERR_BADSIG;
-        } else {
-          /* I/O error */
-          err_num = SNERR_IOERR;
-        }
-      }
-      if ((!err_num) && (c != SNFILTER_BOM_2)) {
-        err_num = SNERR_BADSIG;
-      }
-      
-      /* Read the third character and confirm it's present and part of
-       * the BOM */
-      if (!err_num) {
-        c = getc(pIn);
-        if (c == EOF) {
-          if (feof(pIn)) {
-            /* File ends before complete UTF-8 BOM */
-            err_num = SNERR_BADSIG;
-          } else {
-            /* I/O error */
-            err_num = SNERR_IOERR;
-          }
-        }
-        if ((!err_num) && (c != SNFILTER_BOM_3)) {
-          err_num = SNERR_BADSIG;
-        }
-      }
-      
-      /* If we got here successfully, set the BOM flag */
-      if (!err_num) {
-        pFilter->bom_present = 1;
-      }
-      
-    } else if (!err_num) {
-      /* First character not part of a UTF-8 BOM; unread it */
-      if (ungetc(c, pIn) == EOF) {
-        err_num = SNERR_IOERR;
-      }
-    }
-  }
-  
   /* If we're not in pushback mode and we don't have a special
-   * condition, we need to read another character */
-  if ((!err_num) && (!(pFilter->pushback)) &&
+   * condition, we need to read another codepoint */
+  if ((!(pFilter->pushback)) &&
         ((pFilter->line_count == 0) || (pFilter->c >= 0))) {
     
-    /* Read a character */
-    c = getc(pIn);
-    if (c == EOF) {
-      if (feof(pIn)) {
-        err_num = SNERR_EOF;
-      } else {
-        err_num = SNERR_IOERR;
+    /* Read a codepoint */
+    c = snsource_readCPV(pIn);
+    if (c < 0) {
+      err_num = (int) c;
+    }
+    
+    /* If this is the first codepoint read, and it is the U+FEFF Byte
+     * Order Mark (BOM), then skip it by reading again */
+    if ((!err_num) && (pFilter->line_count == 0) && (c == 0xfeffL)) {
+      c = snsource_readCPV(pIn);
+      if (c < 0) {
+        err_num = (int) c;
       }
     }
     
-    /* If we read a CR or a LF, see if we can pair it with the next
-     * character to form a CR+LF or LF+CR combination */
-    if ((!err_num) && ((c == ASCII_CR) || (c == ASCII_LF))) {
-      
-      /* Read the next character */
-      c2 = getc(pIn);
-      if (c2 == EOF) {
-        if (feof(pIn)) {
-          /* End Of File -- can't pair, so set c2 to special value of
-           * -1 */
-          c2 = -1;
-        } else {
-          /* I/O error */
-          err_num = SNERR_IOERR;
-        }
-      }
-      
-      /* If there is no CR+LF or LF+CR pair, then unread the character
-       * we just read -- unless it was EOF */
-      if ((!err_num) &&
-            (((c == ASCII_LF) && (c2 != ASCII_CR)) ||
-              (c == ASCII_CR) && (c2 != ASCII_LF))) {
-        if (c2 != -1) {
-          if (ungetc(c2, pIn) == EOF) {
-            err_num = SNERR_IOERR;
-          }
-        }
-      }
-    }
-    
-    /* Convert CR characters to LF */
+    /* If we read a CR, read the LF it must be paired with */
     if ((!err_num) && (c == ASCII_CR)) {
-      c = ASCII_LF;
+      
+      /* We read a CR, so read next character and make sure it is LF */
+      c = snsource_readCPV(pIn);
+      if (c < 0) {
+        err_num = (int) c;
+      } else if (c != ASCII_LF) {
+        err_num = SNERR_BADCR;
+      }
+    }
+    
+    /* If we read a low surrogate, error because it means surrogate is
+     * not paired properly */
+    if ((!err_num) && (c >= UNICODE_MIN_LO_SUR) && 
+          (c <= UNICODE_MAX_LO_SUR)) {
+      err_num = SNERR_UNPAIRED;
+    }
+    
+    /* If we read a high surrogate, read next codepoint which must be a
+     * low surrogate and then replace the character read with the
+     * supplemental codepoint selected by the surrogate pair */
+    if ((!err_num) && (c >= UNICODE_MIN_HI_SUR) &&
+          (c <= UNICODE_MAX_HI_SUR)) {
+      
+      /* Read the low surrogate */
+      c2 = snsource_readCPV(pIn);
+      if (c2 < 0) {
+        err_num = (int) c2;
+      } else if ((c2 < UNICODE_MIN_LO_SUR) ||
+                  (c2 > UNICODE_MAX_LO_SUR)) {
+        err_num = SNERR_UNPAIRED;
+      }
+      
+      /* Replace codepoint read with the supplemental codepoint */
+      if (!err_num) {
+        c = snutf_pair(c, c2);
+      }
     }
     
     /* Update state of filter structure */
@@ -1466,36 +2307,6 @@ static long snfilter_count(SNFILTER *pFilter) {
 }
 
 /*
- * Check whether the Byte Order Mark flag is set.
- * 
- * This flag will be set after the first filtered byte is read if a
- * UTF-8 Byte Order Mark (BOM) was filtered out at the very start of the
- * file.  If no BOM was was present, zero will be returned.
- * 
- * This is only meaningful after the first call to snfilter_read.  At
- * the initial state, the BOM flag will always be clear because the
- * start of the file has not been read yet.
- * 
- * Parameter:
- * 
- *   pFilter - the filter state
- * 
- * Return:
- * 
- *   non-zero if BOM flag set, zero if clear
- */
-static int snfilter_bomflag(SNFILTER *pFilter) {
-  
-  /* Check parameter */
-  if (pFilter == NULL) {
-    abort();
-  }
-  
-  /* Return flag */
-  return (pFilter->bom_present);
-}
-
-/*
  * Set the pushback flag, so the character that was just read will be
  * read again.
  * 
@@ -1553,7 +2364,7 @@ static int snfilter_pushback(SNFILTER *pFilter) {
  * 
  *   non-zero if legal, zero if not
  */
-static int snchar_islegal(int c) {
+static int snchar_islegal(long c) {
   
   int result = 0;
   
@@ -1581,7 +2392,7 @@ static int snchar_islegal(int c) {
  * 
  *   non-zero if atomic, zero if not
  */
-static int snchar_isatomic(int c) {
+static int snchar_isatomic(long c) {
   
   int result = 0;
   
@@ -1589,8 +2400,7 @@ static int snchar_isatomic(int c) {
       (c == ASCII_LSQR) || (c == ASCII_RSQR) ||
       (c == ASCII_COMMA) || (c == ASCII_PERCENT) ||
       (c == ASCII_SEMICOLON) || (c == ASCII_DQUOTE) ||
-      (c == ASCII_GRACCENT) || (c == ASCII_LCURL) ||
-      (c == ASCII_RCURL)) {
+      (c == ASCII_LCURL) || (c == ASCII_RCURL)) {
     result = 1;
   } else {
     result = 0;
@@ -1613,12 +2423,11 @@ static int snchar_isatomic(int c) {
  * 
  *   non-zero if inclusive, zero if not
  */
-static int snchar_isinclusive(int c) {
+static int snchar_isinclusive(long c) {
   
   int result = 0;
   
-  if ((c == ASCII_DQUOTE) || (c == ASCII_GRACCENT) ||
-      (c == ASCII_LCURL)) {
+  if ((c == ASCII_DQUOTE) || (c == ASCII_LCURL)) {
     result = 1;
   } else {
     result = 0;
@@ -1641,7 +2450,7 @@ static int snchar_isinclusive(int c) {
  * 
  *   non-zero if exclusive, zero if not
  */
-static int snchar_isexclusive(int c) {
+static int snchar_isexclusive(long c) {
   
   int result = 0;
   
@@ -1660,24 +2469,23 @@ static int snchar_isexclusive(int c) {
 }
 
 /*
- * Determine whether a given string consists purely of the given
- * character.
+ * Determine whether a given string consists purely of the given byte.
  * 
- * c is a unsigned byte value in 7-bit range excludeing nul (1-127) and
+ * c is a unsigned byte value in 7-bit range excluding nul (1-127) and
  * pStr points to a null-terminated string.
  * 
  * This function returns non-zero only if the string has exactly one
- * character, which is equal to c.
+ * byte, which is equal to c.
  * 
  * Parameters:
  * 
- *   c - the character
+ *   c - the byte
  * 
  *   pStr - pointer to the string
  * 
  * Return:
  * 
- *   non-zero if string is equal to character, zero if not
+ *   non-zero if string is equal to byte, zero if not
  */
 static int snchar_strequals(int c, const char *pStr) {
   
@@ -1707,27 +2515,26 @@ static int snchar_strequals(int c, const char *pStr) {
 }
 
 /*
- * Determine whether a given string consists purely of two given
- * characters.
+ * Determine whether a given string consists purely of two given bytes.
  * 
  * c1 and c2 are unsigned byte values in 7-bit range excluding nul
  * (1-127) and pStr points to a null-terminated string.
  * 
  * This function returns non-zero only if the string has exactly two
- * characters, the first of which equals c1 and the second of which
- * equals c2.
+ * bytes, the first of which equals c1 and the second of which equals
+ * c2.
  * 
  * Parameters:
  * 
- *   c1 - the first character
+ *   c1 - the first byte
  * 
- *   c2 - the second character
+ *   c2 - the second byte
  * 
  *   pStr - pointer to the string
  * 
  * Return:
  * 
- *   non-zero if string is equal to the two characters, zero if not
+ *   non-zero if string is equal to the two bytes, zero if not
  */
 static int snchar_strequals2(int c1, int c2, const char *pStr) {
   
@@ -1765,8 +2572,7 @@ static int snchar_strequals2(int c1, int c2, const char *pStr) {
  * must be properly initialized.  This function will reset the buffer
  * and then write the string data into it.
  * 
- * pIn is the file to read data from.  It must be open for read access.
- * Reading is fully sequential.
+ * pIn is the source to read data from.
  * 
  * pFilter is the input filter to read the data through.  It should be
  * in the proper state.
@@ -1779,7 +2585,7 @@ static int snchar_strequals2(int c1, int c2, const char *pStr) {
  * 
  *   pBuffer - the buffer to read the string data into
  * 
- *   pIn - the input file to read the string data from
+ *   pIn - the source to read the string data from
  * 
  *   pFilter - the input filter
  * 
@@ -1789,12 +2595,12 @@ static int snchar_strequals2(int c1, int c2, const char *pStr) {
  */
 static int snstr_readQuoted(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter) {
   
   int err_num = 0;
   int esc_flag = 0;
-  int c = 0;
+  long c = 0;
   
   /* Check parameters */
   if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
@@ -1813,7 +2619,7 @@ static int snstr_readQuoted(
       if (c == SNERR_EOF) {
         err_num = SNERR_OPENSTR;
       } else {
-        err_num = c;
+        err_num = (int) c;
       }
     }
     
@@ -1855,8 +2661,7 @@ static int snstr_readQuoted(
  * must be properly initialized.  This function will reset the buffer
  * and then write the string data into it.
  * 
- * pIn is the file to read data from.  It must be open for read access.
- * Reading is fully sequential.
+ * pIn is the source to read data from.
  * 
  * pFilter is the input filter to read the data through.  It should be
  * in the proper state.
@@ -1870,7 +2675,7 @@ static int snstr_readQuoted(
  * 
  *   pBuffer - the buffer to read the string data into
  * 
- *   pIn - the input file to read the string data from
+ *   pIn - the source to read the string data from
  * 
  *   pFilter - the input filter
  * 
@@ -1880,13 +2685,13 @@ static int snstr_readQuoted(
  */
 static int snstr_readCurlied(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter) {
   
   int err_num = 0;
   int esc_flag = 0;
   long nest_level = 1;
-  int c = 0;
+  long c = 0;
   
   /* Check parameters */
   if ((pBuffer == NULL) || (pIn == NULL) || (pFilter == NULL)) {
@@ -1905,7 +2710,7 @@ static int snstr_readCurlied(
       if (c == SNERR_EOF) {
         err_num = SNERR_OPENSTR;
       } else {
-        err_num = c;
+        err_num = (int) c;
       }
     }
     
@@ -1961,19 +2766,19 @@ static int snstr_readCurlied(
 /*
  * Skip over zero or more characters of whitespace and comments.
  * 
- * After this operation, the file and filter will be positioned at the
+ * After this operation, the source and filter will be positioned at the
  * first character that is not whitespace and not part of a comment, or
  * at the first special or error condition that was encountered.
  * 
  * Parameters:
  * 
- *   pIn - the input file
+ *   pIn - the input source
  * 
  *   pFilter - the filter to pass the input through
  */
-static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
+static void sntk_skip(SNSOURCE *pIn, SNFILTER *pFilter) {
   
-  int c = 0;
+  long c = 0;
   
   /* Check parameters */
   if ((pIn == NULL) || (pFilter == NULL)) {
@@ -2014,31 +2819,27 @@ static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
  * properly initialized.  This function will reset the buffer and then
  * write the token into it.
  * 
- * pIn is the file to read data from.  It must be open for read access.
- * Reading is fully sequential.
+ * pIn is the source to read data from.
  * 
  * pFilter is the input filter to read the data through.  It should be
  * in the proper state.
  * 
  * This function will skip over comments and whitespace before reading
- * the token.  If the special |; token is read, this function will also
- * read through the rest of the file, confirming that nothing except for
- * whitespace and comments is present after the |; token.
+ * the token.
  * 
- * For string tokens and embedded tokens, this function only reads the
- * opening token and not the data that follows it.  Input will be
- * positioned such that the next byte read will the first byte of string
- * data or embedded data.
+ * For string tokens, this function only reads the opening token and not
+ * the data that follows it.  Input will be positioned such that the
+ * next byte read will the first byte of string data.
  * 
  * Note that it is not possible to use this function to iterate through
  * all the tokens in a Shastina source file, because this function
- * doesn't handle string data and embedded data.
+ * doesn't handle string data.
  * 
  * Parameters:
  * 
  *   pBuffer - the buffer to read the token into
  * 
- *   pIn - the input file to read the token from
+ *   pIn - the input source to read the token from
  * 
  *   pFilter - the input filter
  * 
@@ -2048,12 +2849,12 @@ static void sntk_skip(FILE *pIn, SNFILTER *pFilter) {
  */
 static int sntk_readToken(
     SNBUFFER * pBuffer,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter) {
   
   int err_num = 0;
-  int c = 0;
-  int c2 = 0;
+  long c = 0;
+  long c2 = 0;
   int term = 0;
   int leave = 0;
   int omit = 0;
@@ -2072,7 +2873,7 @@ static int sntk_readToken(
   /* Read a character */
   c = snfilter_read(pFilter, pIn);
   if (c < 0) {
-    err_num = c;
+    err_num = (int) c;
   }
   
   /* Check that the character is legal */
@@ -2096,7 +2897,7 @@ static int sntk_readToken(
   if ((!err_num) && (c == ASCII_BAR)) {
     c2 = snfilter_read(pFilter, pIn);
     if (c2 < 0) {
-      err_num = c2;
+      err_num = (int) c2;
     }
     
     if ((!err_num) && (c2 == ASCII_SEMICOLON)) {
@@ -2107,20 +2908,6 @@ static int sntk_readToken(
     } else {
       if (!snfilter_pushback(pFilter)) {
         abort();  /* shouldn't happen */
-      }
-    }
-  }
-  
-  /* If we just read the terminal |; token, make sure there's nothing
-   * else in the input file */
-  if ((!err_num) && term) {
-    sntk_skip(pIn, pFilter);
-    c2 = snfilter_read(pFilter, pIn);
-    if (c2 != SNERR_EOF) {
-      if (c2 >= 0) {
-        err_num = SNERR_TRAILER;
-      } else {
-        err_num = c2;
       }
     }
   }
@@ -2137,7 +2924,7 @@ static int sntk_readToken(
         /* Read another character */
         c = snfilter_read(pFilter, pIn);
         if (c < 0) {
-          err_num = c;
+          err_num = (int) c;
         }
         
         /* Make sure the character is legal */
@@ -2194,31 +2981,29 @@ static int sntk_readToken(
  * fields will be filled in.  See the structure documentation for
  * further information.
  * 
- * pIn is the file to read data from.  It must be open for read access.
- * Reading is fully sequential.
+ * pIn is the source to read data from.
  * 
  * pFilter is the input filter to read the data through.  It should be
  * in the proper state.
  * 
  * This function differs from sntk_readToken() in that this function can
- * also read string data.  The only thing that this function is unable
- * to read is embedded data.
- * 
- * For embedded tokens, input will be positioned such that the next byte
- * read will be the first byte of embedded data.
+ * also read string data.
  * 
  * Parameters:
  * 
  *   pToken - the token structure
  * 
- *   pIn - the input file
+ *   pIn - the input source
  * 
  *   pFil - the filter to pass input through
  */
-static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
+static void sntoken_read(
+    SNTOKEN  * pToken,
+    SNSOURCE * pIn,
+    SNFILTER * pFil) {
   
   int err_num = 0;
-  int c = 0;
+  long c = 0;
   
   /* Check parameters */
   if ((pToken == NULL) || (pIn == NULL) || (pFil == NULL)) {
@@ -2253,9 +3038,6 @@ static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
       pToken->status = SNTOKEN_STRING;
       pToken->str_type = SNSTRING_CURLY;
     
-    } else if (c == ASCII_GRACCENT) {
-      pToken->status = SNTOKEN_EMBED;
-    
     } else {
       pToken->status = SNTOKEN_SIMPLE;
     }
@@ -2269,10 +3051,9 @@ static void sntoken_read(SNTOKEN *pToken, FILE *pIn, SNFILTER *pFil) {
     }
   }
   
-  /* For string and embedded tokens, remove the last character, so the
-   * key buffer only has the prefix */
-  if ((!err_num) && ((pToken->status == SNTOKEN_STRING) ||
-                      (pToken->status == SNTOKEN_EMBED))) {
+  /* For string tokens, remove the last character, so the key buffer
+   * only has the prefix */
+  if ((!err_num) && (pToken->status == SNTOKEN_STRING)) {
     if (!snbuffer_less(pToken->pKey)) {
       abort();  /* shouldn't happen */
     }
@@ -2340,9 +3121,9 @@ static void snreader_init(SNREADER *pReader) {
     SNREADER_VAL_INIT, SNREADER_VAL_MAX);
   
   snstack_init(&(pReader->stack_array),
-    SNREADER_ARRAY_INIT, SNREADER_ARRAY_MAX);
+    SNREADER_AGSTACK_INIT, SNREADER_AGSTACK_MAX);
   snstack_init(&(pReader->stack_group),
-    SNREADER_GROUP_INIT, SNREADER_GROUP_MAX);
+    SNREADER_AGSTACK_INIT, SNREADER_AGSTACK_MAX);
   
   pReader->meta_flag = 0;
   pReader->array_flag = 0;
@@ -2397,8 +3178,7 @@ static void snreader_reset(SNREADER *pReader, int full) {
  * the results of the operation.  See the structure documentation for
  * further information.
  * 
- * pIn is the input file to read from.  It must be open for reading.
- * Reading is sequential.
+ * pIn is the input source to read from.
  * 
  * pFilter is the input filter to pass the input through.  It must be
  * properly initialized.
@@ -2417,14 +3197,14 @@ static void snreader_reset(SNREADER *pReader, int full) {
  * 
  *   pEntity - pointer to the entity to receive the results
  * 
- *   pIn - the input file
+ *   pIn - the input source
  * 
  *   pFilter - the input filter
  */
 static void snreader_read(
     SNREADER * pReader,
     SNENTITY * pEntity,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter) {
   
   int err_code = 0;
@@ -2546,7 +3326,6 @@ static void snreader_addEntityZ(SNREADER *pReader, int entity) {
  * 
  * The only entities allowed by this function are:
  * 
- *   - SNENTITY_EMBEDDED
  *   - SNENTITY_META_TOKEN
  *   - SNENTITY_NUMERIC
  *   - SNENTITY_VARIABLE
@@ -2581,8 +3360,7 @@ static void snreader_addEntityS(
   if ((pReader == NULL) || (s == NULL)) {
     abort();
   }
-  if ((entity != SNENTITY_EMBEDDED) &&
-      (entity != SNENTITY_META_TOKEN) &&
+  if ((entity != SNENTITY_META_TOKEN) &&
       (entity != SNENTITY_NUMERIC) &&
       (entity != SNENTITY_VARIABLE) &&
       (entity != SNENTITY_CONSTANT) &&
@@ -2843,7 +3621,7 @@ static void snreader_arrayPrefix(SNREADER *pReader) {
  */
 static void snreader_fill(
     SNREADER * pReader,
-    FILE     * pIn,
+    SNSOURCE * pIn,
     SNFILTER * pFilter) {
   
   int err_code = 0;
@@ -2933,7 +3711,7 @@ static void snreader_fill(
       snreader_addEntityS(pReader, SNENTITY_META_TOKEN, pks);
       
     } else {
-      /* Primitive tokens -- first, get first character */
+      /* Primitive tokens -- first, get first byte */
       firstchar = pks[0];
       
       /* Handle the various primitive tokens */
@@ -3052,15 +3830,6 @@ static void snreader_fill(
       snreader_addEntityT(pReader, SNENTITY_STRING,
         pks, tk.str_type, snbuffer_get(tk.pValue));
     }
-    
-  } else if ((tk.status == SNTOKEN_EMBED) && (!err_code)) {
-    /* Embedded token */
-    if (!(pReader->meta_flag)) {
-      snreader_addEntityS(pReader, SNENTITY_EMBEDDED, pks);
-    } else {
-      /* Embedded data not allowed in metacommands */
-      err_code = SNERR_METAEMBED;
-    }
   
   } else if ((tk.status == SNTOKEN_FINAL) && (!err_code)) {
     /* Final token */
@@ -3109,6 +3878,168 @@ static void snreader_fill(
  */
 
 /*
+ * snsource_file function.
+ */
+SNSOURCE *snsource_file(FILE *pFile, int owner) {
+  
+  SNSOURCE *pSrc = NULL;
+  
+  /* Check parameters */
+  if (pFile == NULL) {
+    abort();
+  }
+  
+  /* Call through to construct object */
+  if (owner) {
+    pSrc = snsource_custom(
+              &snsource_file_read,
+              &snsource_file_free,
+              (void *) pFile);
+  } else {
+    pSrc = snsource_custom(
+              &snsource_file_read,
+              NULL,
+              (void *) pFile);
+  }
+  
+  /* Return the new source object */
+  return pSrc;
+}
+
+/*
+ * snsource_string function.
+ */
+SNSOURCE *snsource_string(const char *pStr) {
+  
+  SNSTRSRC *pStS = NULL;
+  
+  /* Check parameter */
+  if (pStr == NULL) {
+    abort();
+  }
+  
+  /* Allocate new structure */
+  pStS = (SNSTRSRC *) malloc(sizeof(SNSTRSRC));
+  if (pStS == NULL) {
+    abort();
+  }
+  memset(pStS, 0, sizeof(SNSTRSRC));
+  
+  /* Copy the pointer into the structure */
+  pStS->pStr = (const unsigned char *) pStr;
+  
+  /* Call through to construct object */
+  return snsource_custom(
+            &snsource_str_read,
+            &snsource_str_free,
+            (void *) pStS);
+}
+
+/*
+ * snsource_custom function.
+ */
+SNSOURCE *snsource_custom(
+    int (*read_func)(void *),
+    void (*free_func)(void *),
+    void *custom) {
+  
+  SNSOURCE *pSrc = NULL;
+  
+  /* Check parameters */
+  if (read_func == NULL) {
+    abort();
+  }
+  
+  /* Allocate structure */
+  pSrc = (SNSOURCE *) malloc(sizeof(SNSOURCE));
+  if (pSrc == NULL) {
+    abort();
+  }
+  memset(pSrc, 0, sizeof(SNSOURCE));
+  
+  /* Initialize structure */
+  pSrc->pfRead = read_func;
+  pSrc->pfDestruct = free_func;
+  
+  pSrc->read_count = 0;
+  pSrc->status = 0;
+  pSrc->pCustom = custom;
+  
+  /* Return the new source object */
+  return pSrc;
+}
+
+/*
+ * snsource_free function.
+ */
+void snsource_free(SNSOURCE *pSrc) {
+  
+  /* Only proceed if non-NULL parameter passed */
+  if (pSrc != NULL) {
+    
+    /* If destructor is defined, call it */
+    if (pSrc->pfDestruct != NULL) {
+      (*(pSrc->pfDestruct))(pSrc->pCustom);
+    }
+    
+    /* Release the structure */
+    free(pSrc);
+  }
+}
+
+/*
+ * snsource_bytes function.
+ */
+long snsource_bytes(SNSOURCE *pSrc) {
+  
+  /* Check parameter */
+  if (pSrc == NULL) {
+    abort();
+  }
+  
+  /* Return count */
+  return pSrc->read_count;
+}
+
+/*
+ * snsource_consume function.
+ */
+int snsource_consume(SNSOURCE *pSrc) {
+  
+  long c = 0;
+  int result = 0;
+  
+  /* Check parameter */
+  if (pSrc == NULL) {
+    abort();
+  }
+  
+  /* Keep reading until we get something besides SP HT CR LF */
+  for(c = snsource_readCPV(pSrc);
+      (c == ASCII_SP) || (c == ASCII_HT) ||
+      (c == ASCII_CR) || (c == ASCII_LF);
+      c = snsource_readCPV(pSrc));
+  
+  /* Set result depending on what we stopped on */
+  if (c == SNERR_EOF) {
+    /* Nothing but whitespace and blank lines present, so succeed */
+    result = 1;
+  
+  } else if (c == SNERR_IOERR) {
+    /* I/O error, so return that */
+    result = SNERR_IOERR;
+    
+  } else {
+    /* In all other cases, including data bytes besides whitespace and
+     * line breaks and other kinds of errors, return a trailer error */
+    result = SNERR_TRAILER;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
  * snparser_alloc function.
  */
 SNPARSER *snparser_alloc(void) {
@@ -3146,7 +4077,10 @@ void snparser_free(SNPARSER *pParser) {
 /*
  * snparser_read function.
  */
-void snparser_read(SNPARSER *pParser, SNENTITY *pEntity, FILE *pIn) {
+void snparser_read(
+    SNPARSER * pParser,
+    SNENTITY * pEntity,
+    SNSOURCE * pIn) {
   
   /* Check parameters */
   if ((pParser == NULL) || (pEntity == NULL) || (pIn == NULL)) {
@@ -3172,20 +4106,6 @@ long snparser_count(SNPARSER *pParser) {
 }
 
 /*
- * snparser_bomflag function.
- */
-int snparser_bomflag(SNPARSER *pParser) {
-  
-  /* Check parameter */
-  if (pParser == NULL) {
-    abort();
-  }
-  
-  /* Return BOM flag */
-  return snfilter_bomflag(&(pParser->filter));
-}
-
-/*
  * snerror_str function.
  */
 const char *snerror_str(int code) {
@@ -3202,8 +4122,8 @@ const char *snerror_str(int code) {
       pResult = "Unexpected end of file";
       break;
     
-    case SNERR_BADSIG:
-      pResult = "Unrecognized file signature";
+    case SNERR_BADCR:
+      pResult = "CR must always be followed by LF";
       break;
     
     case SNERR_OPENSTR:
@@ -3266,8 +4186,8 @@ const char *snerror_str(int code) {
       pResult = "Array has too many elements";
       break;
     
-    case SNERR_METAEMBED:
-      pResult = "Embedded data in metacommand";
+    case SNERR_UNPAIRED:
+      pResult = "Unpaired surrogates encountered in input";
       break;
     
     case SNERR_OPENMETA:
@@ -3280,6 +4200,10 @@ const char *snerror_str(int code) {
     
     case SNERR_COMMA:
       pResult = "Comma used outside of array or meta";
+      break;
+    
+    case SNERR_UTF8:
+      pResult = "Invalid UTF-8 encountered in input";
       break;
     
     default:
