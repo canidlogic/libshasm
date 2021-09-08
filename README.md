@@ -11,6 +11,10 @@ A test program is provided as `shasm.c`.  See the source code in that program fo
 
 ## Releases
 
+### 0.9.3 (beta)
+
+Added multipass support to the input source architecture.  This release is fully backwards compatible with 0.9.2.
+
 ### 0.9.2 (beta)
 
 Added a new input source architecture.  Added requirement for UTF-8 input and added built-in Unicode support.  Dropped embedded data feature, which was never used in practice and had implementation difficulties.  Added a completed language specification.

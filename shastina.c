@@ -155,6 +155,11 @@ struct SNSOURCE_TAG {
    * read from the source will return the same value as the last call
    * without calling through to this callback function.
    * 
+   * For sources that support multipass, rewinding will reset back to
+   * the beginning of the data, clearing any SNERR_EOF condition that
+   * may be present.  However, rewinding will NOT clear SNERR_IOERR
+   * state, which remains even if the source is rewound.
+   * 
    * Parameters:
    * 
    *   (void *) - the custom data parameter that is passed through to
@@ -188,11 +193,25 @@ struct SNSOURCE_TAG {
   void (*pfDestruct)(void *);
   
   /*
+   * Function pointer to an optional rewind function.
+   * 
+   * This may be NULL, in which case the source does not support
+   * multipass.
+   * 
+   * If a rewind routine is provided, then the source supports
+   * multipass.
+   */
+  int (*pfRewind)(void *);
+  
+  /*
    * The total number of (unfiltered) bytes that have been read through
    * this source object, not including any EOF or I/O error returns.
    * 
    * If this is LONG_MAX, then the total number of bytes read has
    * exceeded the range of a long.
+   * 
+   * This counter is reset to zero for multipass sources when they are
+   * rewound.
    */
   long read_count;
   
@@ -209,6 +228,10 @@ struct SNSOURCE_TAG {
    * stored function pointer.
    * 
    * This may also be set to SNERR_UTF8 if UTF-8 decoding fails.
+   * 
+   * For multipass sources, rewinding can clear SNERR_EOF condition, but
+   * not SNERR_IOERR or SNERR_UTF8 conditions.  Failure during rewinding
+   * can set an SNERR_IOERR status.
    */
   int status;
   
@@ -242,6 +265,15 @@ typedef struct {
    * the terminating nul.
    */
   const unsigned char *pStr;
+  
+  /*
+   * The pointer to the start of the string.
+   * 
+   * This is *not* updated and *not* advanced as the string is read.  It
+   * is used during rewind operations to reset the source to the
+   * beginning.
+   */
+  const unsigned char *pRewind;
   
 } SNSTRSRC;
 
@@ -591,8 +623,11 @@ static void snutf_encode(long cpv, unsigned char *pb);
 
 static int snsource_file_read(void *pCustom);
 static void snsource_file_free(void *pCustom);
+static int snsource_file_rewind(void *pCustom);
+
 static int snsource_str_read(void *pCustom);
 static void snsource_str_free(void *pCustom);
+static int snsource_str_rewind(void *pCustom);
 
 static int snsource_read(SNSOURCE *pIn);
 static long snsource_readCPV(SNSOURCE *pIn);
@@ -1101,6 +1136,34 @@ static void snsource_file_free(void *pCustom) {
 }
 
 /*
+ * Rewind callback for a stdio FILE * source.
+ * 
+ * The function prototype matches pfRewind in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static int snsource_file_rewind(void *pCustom) {
+  
+  int status = 1;
+  FILE *pIn = NULL;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to a FILE * handle */
+  pIn = (FILE *) pCustom;
+  
+  /* Seek back to the beginning of the file */
+  if (fseek(pIn, 0, SEEK_SET)) {
+    status = 0;
+  }
+  
+  /* Return status */
+  return status;
+}
+
+/*
  * Reading callback for a string source.
  * 
  * The function prototype matches pfRead in SNSOURCE.  See the
@@ -1154,6 +1217,31 @@ static void snsource_str_free(void *pCustom) {
   
   /* Free the structure */
   free(pStS);
+}
+
+/*
+ * Rewind callback for a string source.
+ * 
+ * The function prototype matches pfRewind in SNSOURCE.  See the
+ * documentation of that field for further information.
+ */
+static int snsource_str_rewind(void *pCustom) {
+  
+  SNSTRSRC *pStS = NULL;
+  
+  /* Check parameter */
+  if (pCustom == NULL) {
+    abort();
+  }
+  
+  /* Convert parameter to the string handling structure */
+  pStS = (SNSTRSRC *) pCustom;
+  
+  /* Reset the string pointer back to its initial value */
+  pStS->pStr = pStS->pRewind;
+  
+  /* This operation always succeeds */
+  return 1;
 }
 
 /*
@@ -3884,26 +3972,50 @@ SNSOURCE *snsource_file(FILE *pFile, int owner) {
   
   SNSOURCE *pSrc = NULL;
   
+  /* Call through to stream function */
+  if (owner) {
+    pSrc = snsource_stream(pFile, SNSTREAM_OWNER);
+  } else {
+    pSrc = snsource_stream(pFile, SNSTREAM_NORMAL);
+  }
+  
+  /* Return new source */
+  return pSrc;
+}
+
+/*
+ * snsource_stream function.
+ */
+SNSOURCE *snsource_stream(FILE *pFile, int flags) {
+  
+  void (*pDestruct)(void *) = NULL;
+  int (*pRewind)(void *) = NULL;
+  
   /* Check parameters */
   if (pFile == NULL) {
     abort();
   }
   
-  /* Call through to construct object */
-  if (owner) {
-    pSrc = snsource_custom(
-              &snsource_file_read,
-              &snsource_file_free,
-              (void *) pFile);
+  /* Set destructor based on OWNER flag */
+  if (flags & SNSTREAM_OWNER) {
+    pDestruct = &snsource_file_free;
   } else {
-    pSrc = snsource_custom(
-              &snsource_file_read,
-              NULL,
-              (void *) pFile);
+    pDestruct = NULL;
   }
   
-  /* Return the new source object */
-  return pSrc;
+  /* Set rewind routine based on RANDOM flag */
+  if (flags & SNSTREAM_RANDOM) {
+    pRewind = &snsource_file_rewind;
+  } else {
+    pRewind = NULL;
+  }
+  
+  /* Call through to construct object */
+  return snsource_custom(
+            &snsource_file_read,
+            pDestruct,
+            pRewind,
+            (void *) pFile);
 }
 
 /*
@@ -3927,11 +4039,13 @@ SNSOURCE *snsource_string(const char *pStr) {
   
   /* Copy the pointer into the structure */
   pStS->pStr = (const unsigned char *) pStr;
+  pStS->pRewind = (const unsigned char *) pStr;
   
   /* Call through to construct object */
   return snsource_custom(
             &snsource_str_read,
             &snsource_str_free,
+            &snsource_str_rewind,
             (void *) pStS);
 }
 
@@ -3941,6 +4055,7 @@ SNSOURCE *snsource_string(const char *pStr) {
 SNSOURCE *snsource_custom(
     int (*read_func)(void *),
     void (*free_func)(void *),
+    int (*rewind_func)(void *),
     void *custom) {
   
   SNSOURCE *pSrc = NULL;
@@ -3960,10 +4075,17 @@ SNSOURCE *snsource_custom(
   /* Initialize structure */
   pSrc->pfRead = read_func;
   pSrc->pfDestruct = free_func;
+  pSrc->pfRewind = rewind_func;
   
   pSrc->read_count = 0;
   pSrc->status = 0;
   pSrc->pCustom = custom;
+  
+  /* If a rewind routine was provided, rewind right away; errors ignored
+   * since they will immediately set structure into IOERR status */
+  if (rewind_func != NULL) {
+    snsource_rewind(pSrc);
+  }
   
   /* Return the new source object */
   return pSrc;
@@ -4037,6 +4159,71 @@ int snsource_consume(SNSOURCE *pSrc) {
   
   /* Return result */
   return result;
+}
+
+/*
+ * snsource_ismulti function.
+ */
+int snsource_ismulti(SNSOURCE *pSrc) {
+  
+  int result = 0;
+  
+  /* Check parameter */
+  if (pSrc == NULL) {
+    abort();
+  }
+  
+  /* Presence of rewind function determines multipass support */
+  if (pSrc->pfRewind != NULL) {
+    result = 1;
+  } else {
+    result = 0;
+  }
+  
+  /* Return result */
+  return result;
+}
+
+/*
+ * snsource_rewind function.
+ */
+int snsource_rewind(SNSOURCE *pSrc) {
+  
+  int status = 1;
+  
+  /* Check parameter and state */
+  if (pSrc == NULL) {
+    abort();
+  }
+  if (pSrc->pfRewind == NULL) {
+    abort();
+  }
+  
+  /* If source currently in EOF state, clear that */
+  if (pSrc->status == SNERR_EOF) {
+    pSrc->status = 0;
+  }
+  
+  /* If we are in an error state, rewind fails */
+  if (pSrc->status != 0) {
+    status = 0;
+  }
+  
+  /* Attempt to rewind the source */
+  if (status) {
+    if (!(*(pSrc->pfRewind))(pSrc->pCustom)) {
+      status = 0;
+      pSrc->status = SNERR_IOERR;
+    }
+  }
+  
+  /* If we rewound successfully, clear the read counter */
+  if (status) {
+    pSrc->read_count = 0;
+  }
+  
+  /* Return status of operation */
+  return status;
 }
 
 /*
