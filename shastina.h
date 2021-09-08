@@ -39,6 +39,25 @@
 #define SNERR_UTF8      (-23) /* Invalid UTF-8 in input */
 
 /*
+ * Flags for use with snsource_stream().
+ * 
+ * SNSTREAM_NORMAL has a value of zero, meaning no special flags set.
+ * The other flags can be combined with bitwise OR.
+ * 
+ * If OWNER flag is set, then the file handle will be closed when the
+ * source is closed.  Otherwise, the file handle remains owned by the
+ * caller and will not be closed by the stream object.  Do not use OWNER
+ * when wrapping stdin in a stream!
+ * 
+ * If RANDOM flag is set, then the file handle supports random access,
+ * so multiplass operation is enabled with file I/O.  Do not use RANDOM
+ * with stdin!
+ */
+#define SNSTREAM_NORMAL   (0)
+#define SNSTREAM_OWNER    (1)
+#define SNSTREAM_RANDOM   (2)
+
+/*
  * The types of entities.
  */
 #define SNENTITY_EOF          (0)   /* End Of File */
@@ -158,6 +177,24 @@ typedef struct {
 } SNENTITY;
 
 /*
+ * Simple wrapper around snsource_stream().
+ * 
+ * If owner is non-zero, then the flags will be SNSTREAM_OWNER.  If the
+ * owner is zero, then the flags will be SNSTREAM_NORMAL (zero).
+ * 
+ * Parameters:
+ * 
+ *   pFile - the file handle to wrap
+ * 
+ *   flags - combination of SNSTREAM flags
+ * 
+ * Return:
+ * 
+ *   a new Shastina source wrapping the file handle
+ */
+SNSOURCE *snsource_file(FILE *pFile, int owner);
+
+/*
  * Allocate a Shastina source that wraps a stdio FILE handle.
  * 
  * pFile is the file handle to wrap.  It must be open for reading or
@@ -165,20 +202,16 @@ typedef struct {
  * source should use the file while the source object is allocated or
  * undefined behavior occurs.
  * 
- * owner is non-zero if the Shastina source object is the owner of the
- * file handle, zero if not.  If the Shastina source object is the owner
- * of the file handle, a destructor routine will be included in the
- * source structure that closes the file handled, such that the file
- * handle will be closed when the Shastina source is released.  If the
- * Shastina source object is not the owner of the file handle, then no
- * destructor routine will be added and the file handle will NOT be
- * closed when the source object is released.
- * 
- * If you are passing stdin as the file, owner should be zero.
+ * flags is a combination of SNSTREAM flags, or SNSTREAM_NORMAL (zero)
+ * if no flags are required.  See the documentation of the SNSTREAM
+ * constants for further information.  Unrecognized flags are ignored.
  * 
  * Calls to read from the Shastina source will read from the underlying
- * file handle.  Reading is fully sequential, so you may pass stdin as
- * the file handle.
+ * file handle.  If the RANDOM flag was specified, then multipass
+ * support will be enabled.  Otherwise, reading is fully sequential and
+ * no multipass operation is supported.
+ * 
+ * Multipass sources will immediately be rewound during construction.
  * 
  * The returned source object should eventually be freed with
  * snsource_free().
@@ -196,14 +229,13 @@ typedef struct {
  * 
  *   pFile - the file handle to wrap
  * 
- *   owner - non-zero if the source object is the owner of the file
- *   handle, zero if not
+ *   flags - combination of SNSTREAM flags
  * 
  * Return:
  * 
  *   a new Shastina source wrapping the file handle
  */
-SNSOURCE *snsource_file(FILE *pFile, int owner);
+SNSOURCE *snsource_stream(FILE *pFile, int flags);
 
 /*
  * Allocate a Shastina source that wraps a nul-terminated string.
@@ -216,7 +248,7 @@ SNSOURCE *snsource_file(FILE *pFile, int owner);
  * is not included in the bytes that are read through the source.
  * 
  * Calls to read from the Shastina source will read bytes from the given
- * string.
+ * string.  String sources have full support for multipass.
  * 
  * The returned source object should eventually be freed with
  * snsource_free().
@@ -261,7 +293,8 @@ SNSOURCE *snsource_string(const char *pStr);
  * input source.
  * 
  * Once the callback function has returned SNERR_EOF or SNERR_IOERR, it
- * will not be called again.
+ * will not be called again.  However, multipass sources can clear the
+ * SNERR_EOF condition by rewinding.
  * 
  * free_func is a function pointer to a destructor function, or NULL if
  * no destructor function is required.
@@ -272,6 +305,17 @@ SNSOURCE *snsource_string(const char *pStr);
  * destructor may be used for freeing whatever is pointed to by the
  * custom parameter.  If this is not needed, use NULL for the
  * destructor.
+ * 
+ * rewind_func is a function pointer to a multipass rewinding function,
+ * or NULL if the source does not support multipass.  The void pointer
+ * it takes will always be the same as the custom parameter passed to
+ * this constructor function.  It should return non-zero if successful
+ * or zero if an I/O error prevented rewinding.  Failure to rewind
+ * results in SNERR_IOERR state for the source.
+ * 
+ * If rewind_func is provided, it will be called during this constructor
+ * routine to make sure the source starts at the beginning.  If it
+ * fails, the constructed source will start out in SNERR_IOERR state.
  * 
  * custom is a custom parameter that is passed through to both the read
  * callback and the destructor function (if the destructor is defined).
@@ -286,6 +330,8 @@ SNSOURCE *snsource_string(const char *pStr);
  * 
  *   free_func - the destructor callback, or NULL
  * 
+ *   rewind_func - the multipass rewind callback, or NULL
+ * 
  *   custom - the custom data, which may be NULL
  * 
  * Return:
@@ -295,6 +341,7 @@ SNSOURCE *snsource_string(const char *pStr);
 SNSOURCE *snsource_custom(
     int (*read_func)(void *),
     void (*free_func)(void *),
+    int (*rewind_func)(void *),
     void *custom);
 
 /*
@@ -327,6 +374,8 @@ void snsource_free(SNSOURCE *pSrc);
  * After successfully reading the |; entity, this count will be total
  * number of bytes from the start of the file up to and including the
  * semicolon in the |; entity.
+ * 
+ * For multipass sources, rewinding will reset this counter to zero.
  * 
  * Parameters:
  * 
@@ -391,6 +440,46 @@ long snsource_bytes(SNSOURCE *pSrc);
  *   source object
  */
 int snsource_consume(SNSOURCE *pSrc);
+
+/*
+ * Determine whether a given Shastina source supports multipass
+ * operation.
+ * 
+ * Multipass sources can be rewound at any time to start reading again
+ * from the beginning.  Single-pass sources can only be read through
+ * once.
+ * 
+ * Parameters:
+ * 
+ *   pSrc - the Shastina source object
+ * 
+ * Return:
+ * 
+ *   non-zero if source supports multipass, zero if not
+ */
+int snsource_ismulti(SNSOURCE *pSrc);
+
+/*
+ * Rewind a Shastina source back to the beginning so it can be read
+ * again.
+ * 
+ * This is only supported by multipass sources.  A fault occurs if it is
+ * called on a single-pass source.  Use snsource_ismulti() to check
+ * whether a source supports this function.
+ * 
+ * If you are rewinding, you will probably need to allocate a new parser
+ * object to parse the file in the new pass.
+ * 
+ * Parameters:
+ * 
+ *   pSrc - the Shastina source object
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if an I/O error prevented a successful
+ *   rewind
+ */
+int snsource_rewind(SNSOURCE *pSrc);
 
 /*
  * Allocate a new Shastina parser.
