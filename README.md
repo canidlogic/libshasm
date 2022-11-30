@@ -11,6 +11,10 @@ A test program is provided as `shasm.c`.  See the source code in that program fo
 
 ## Releases
 
+### Development
+
+Fixed escape handling within string literals.  Double quotes and curly braces are now only escaped if they are preceded by an odd-numbered sequence of backslashes, rather than always being escaped if preceded by a backslash.  This is not a backwards-compatible change, but escaping is otherwise broken for the common case where two backslashes are used to escape a literal backslash.
+
 ### 0.9.3 (beta)
 
 Added multipass support to the input source architecture.  This release is fully backwards compatible with 0.9.2.

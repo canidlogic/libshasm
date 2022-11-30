@@ -2687,7 +2687,7 @@ static int snstr_readQuoted(
     SNFILTER * pFilter) {
   
   int err_num = 0;
-  int esc_flag = 0;
+  int esc_count = 0;
   long c = 0;
   
   /* Check parameters */
@@ -2711,18 +2711,19 @@ static int snstr_readQuoted(
       }
     }
     
-    /* If this character is a double quote and the escape flag is not
-     * set, then we are done so leave loop */
-    if ((!err_num) && (!esc_flag) && (c == ASCII_DQUOTE)) {
+    /* If this character is a double quote and the escape count is not
+     * odd, then we are done so leave loop */
+    if ((!err_num) && ((esc_count & 0x1) == 0) && (c == ASCII_DQUOTE)) {
       break;
     }
     
-    /* Update escape flag -- set if current character is a backslash,
-     * clear otherwise */
+    /* Update escape count -- increment if current character is a
+     * backslash, clear otherwise; only least significant bit of the
+     * count is important so mask out upper bits to prevent overflow */
     if ((!err_num) && (c == ASCII_BACKSLASH)) {
-      esc_flag = 1;
+      esc_count = (esc_count + 1) & 0x1;
     } else {
-      esc_flag = 0;
+      esc_count = 0;
     }
     
     /* Make sure character is not a null character */
@@ -2777,7 +2778,7 @@ static int snstr_readCurlied(
     SNFILTER * pFilter) {
   
   int err_num = 0;
-  int esc_flag = 0;
+  int esc_count = 0;
   long nest_level = 1;
   long c = 0;
   
@@ -2802,9 +2803,9 @@ static int snstr_readCurlied(
       }
     }
     
-    /* If escape flag is not set, update the nesting level if current
+    /* If escape count is not odd, update the nesting level if current
      * character is a curly bracket */
-    if ((!err_num) && (!esc_flag)) {
+    if ((!err_num) && ((esc_count & 0x1) == 0)) {
       if (c == ASCII_LCURL) {
         
         /* Left curly -- increase nesting level, watching for
@@ -2826,12 +2827,13 @@ static int snstr_readCurlied(
       break;
     }
     
-    /* Update escape flag -- set if current character is a backslash,
-     * clear otherwise */
+    /* Update escape count -- increment if current character is a
+     * backslash, clear otherwise; only least significant bit of the
+     * count is important so mask out upper bits to prevent overflow */
     if ((!err_num) && (c == ASCII_BACKSLASH)) {
-      esc_flag = 1;
+      esc_count = (esc_count + 1) & 0x1;
     } else {
-      esc_flag = 0;
+      esc_count = 0;
     }
     
     /* Make sure character is not a null character */
