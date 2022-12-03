@@ -6,7 +6,7 @@ use warnings;
 use Scalar::Util qw(looks_like_number);
 
 # Shastina modules
-use Shastina::Const qw(:ERROR_CODES);
+use Shastina::Const qw(:CONSTANTS :ERROR_CODES);
 use Shastina::Filter;
 
 =head1 NAME
@@ -33,6 +33,7 @@ Shastina::Token - Shastina token reader.
       my $prefix  = $tk->[0];
       my $qtype   = $tk->[1];
       my $payload = $tk->[2];
+      ...
     }
   }
   
@@ -65,23 +66,14 @@ iteration through all the tokens.
 #
 use constant CPV_HT        => 0x09;
 use constant CPV_LF        => 0x0a;
-use constant CPV_CR        => 0x0d;
 use constant CPV_SP        => 0x20;
 use constant CPV_DQUOTE    => 0x22;
 use constant CPV_POUNDSIGN => 0x23;
 use constant CPV_PERCENT   => 0x25;
 use constant CPV_LPAREN    => 0x28;
 use constant CPV_RPAREN    => 0x29;
-use constant CPV_PLUS      => 0x2b;
 use constant CPV_COMMA     => 0x2c;
-use constant CPV_HYPHEN    => 0x2d;
-use constant CPV_ZERO      => 0x30;
-use constant CPV_NINE      => 0x39;
-use constant CPV_COLON     => 0x3a;
 use constant CPV_SEMICOLON => 0x3b;
-use constant CPV_EQUALS    => 0x3d;
-use constant CPV_QUESTION  => 0x3f;
-use constant CPV_ATSIGN    => 0x40;
 use constant CPV_LSQR      => 0x5b;
 use constant CPV_BACKSLASH => 0x5c;
 use constant CPV_RSQR      => 0x5d;
@@ -469,7 +461,7 @@ sub _skip {
     # If we encountered anything except the pound sign, set pushback
     # mode (unless a special condition) and leave the loop
     unless ($c == CPV_POUNDSIGN) {
-      if (c >= 0) {
+      if ($c >= 0) {
         $self->{'_fil'}->pushback;
       }
       last;
@@ -483,25 +475,151 @@ sub _skip {
   }
 }
 
+# _readPlain()
+# ------------
+#
+# Read a plain token, excluding any string payload.
+#
+# This function will skip over comments and whitespace before reading
+# the token.  Either returns the plain token as a string, or undef if
+# there was an error.  If there was an error, the _err property of the
+# object will be set to the error code.
+#
+# For string tokens, this function only reads the opening token and not
+# the payload data that follows it.  Input will be positioned such that
+# the next byte read will the first byte of string data, after the
+# opening quote or left curly.  The opening quote or left curly will be
+# the last character in the returned plain token.
+#
+# Note that it is not possible to use this function to iterate through
+# all the tokens in a Shastina source file, because this function
+# doesn't handle string data payloads.
+#
+sub _readPlain {
+  # Check parameter count
+  ($#_ == 0) or die "Wrong number of parameters, stopped";
+  
+  # Get self
+  my $self = shift;
+  (ref($self) and $self->isa(__PACKAGE__)) or
+    die "Wrong parameter type, stopped";
+  
+  # Skip over whitespace and comments
+  $self->_skip;
+  
+  # Read a character
+  my $c = $self->{'_fil'}->readCode;
+  if ($c < 0) {
+    $self->{'_err'} = $c;
+    return undef;
+  }
+  
+  # Check that the character is legal
+  unless (_isLegalCode($c)) {
+    $self->{'_err'} = SNERR_BADCHAR;
+    return undef;
+  }
+  
+  # Begin the token string with this character
+  my $tks = chr($c);
+  
+  # If the first character is a vertical bar, check if the second 
+  # character is a semicolon, forming the |; pair; return a |; token in
+  # this case; else, unread the second character and proceed
+  if ($c == CPV_BAR) {
+    my $c2 = $self->{'_fil'}->readCode;
+    if ($c2 < 0) {
+      $self->{'_err'} = $c2;
+      return undef;
+    }
+    
+    if ($c2 == CPV_SEMICOLON) {
+      return '|;';
+    } else {
+      $self->{'_fil'}->pushback;
+    }
+  }
+  
+  # If the first character read is not atomic, read additional
+  # characters into the token up to the exclusive or inclusive character
+  # that ends the token
+  unless (_isAtomicCode($c)) {
+    # Processing loop
+    while (1) {
+      # Read the next codepoint
+      $c = $self->{'_fil'}->readCode;
+      if ($c < 0) {
+        $self->{'_err'} = $c;
+        return undef;
+      }
+      
+      # Make sure characer is legal
+      unless (_isLegalCode($c)) {
+        $self->{'_err'} = SNERR_BADCHAR;
+        return undef;
+      }
+      
+      # Handling depends on character type
+      if (_isInclusiveCode($c)) {
+        # Inclusive character, so add the character to the token
+        # (checking for overflow), and then leave the loop
+        if (length($tks) < MAX_STRING) {
+          $tks = $tks . chr($c);
+        } else {
+          $self->{'_err'} = SNERR_LONGTOKEN;
+          return undef;
+        }
+        last;
+        
+      } elsif (_isExclusiveCode($c)) {
+        # Exclusive character, so push it back and leave the loop
+        # without adding it to the token
+        $self->{'_fil'}->pushback;
+        last;
+        
+      } else {
+        # Legal character, but neither inclusive nor exclusive, so add
+        # the character to the token (checking for overflow), and
+        # continue on in the loop
+        if (length($tks) < MAX_STRING) {
+          $tks = $tks . chr($c);
+        } else {
+          $self->{'_err'} = SNERR_LONGTOKEN;
+          return undef;
+        }
+      }
+    }
+  }
+  
+  # If we got here, return the plain token
+  return $tks;
+}
+
 =head1 INSTANCE METHODS
 
 =over 4
 
 =item B<readToken()>
 
-If this returns a scalar, it is
-either an integer zero indicating the final C<|;> token was read, or it
-is a negative integer selecting one of the error codes from the
-C<Shastina::Const> module.
+Read the next token from the Shastina file.
 
-If the C<readToken> function returns a reference, then the reference
-will be to an array of length either one or three.  If length one, then
-this is a simple token and the single element is a Unicode string
-storing the token.  If length three, then this is a 
+If this returns a scalar, it is either an integer zero indicating the
+final C<|;> token was read, or it is a negative integer selecting one of
+the error codes from the C<Shastina::Const> module.
+
+If this returns a reference, then the reference will be to an array of
+length one or three.  If length one, then this is a simple token and the
+single element is a Unicode string storing the token.  If length three,
+then this is a string token.  The first element is the string prefix
+excluding the opening quote or curly; this prefix might be empty.  The
+second element is one of the C<SNSTRING> constants from
+C<Shastina::Const> indicating the type of quoting for the string.  The
+third element is the string data, excluding the opening and closing
+quotes or curlies.
 
 =cut
 
-sub readCode {
+sub readToken {
   # Check parameter count
   ($#_ == 0) or die "Wrong number of parameters, stopped";
   
@@ -510,181 +628,40 @@ sub readCode {
   (ref($self) and $self->isa(__PACKAGE__)) or
     die "Wrong parameter type, stopped";
   
-  # If we are not in pushback mode AND either we haven't read anything
-  # yet, or we have read something other than an error code, then we
-  # need to read another codepoint
-  if ((not $self->{'_push'}) and
-        (($self->{'_count'} == 0) or ($self->{'_c'} >= 0))) {
+  # Read a plain token
+  my $plain = $self->_readPlain;
+  (defined $plain) or return $self->{'_err'};
+  
+  # Identify the type of token
+  if ($plain eq '|;') {
+    # Final token
+    return 0;
     
-    # Read an unfiltered codepoint from the input source
-    my $cpv = $self->_readCPV;
+  } elsif ($plain =~ /"\z/) {
+    # Double-quote string token -- read the payload
+    my $payload = $self->_readQuoted;
+    (defined $payload) or return $self->{'_err'};
     
-    # Apply BOM filtering
-    if ($cpv == CPV_BOM) {
-      # If this BOM codepoint is the very first codepoint read, then
-      # skip it by reading another codepoint
-      if ($self->{'_count'} == 0) {
-        $cpv = $self->_readCPV;
-      }
-    }
+    # Trim off the opening quote
+    $plain = substr($plain, 0, -1);
     
-    # Apply CR+LF filtering
-    if ($cpv == CPV_CR) {
-      # We read a CR, so read the next codepoint to skip it, which must
-      # either be a LF or an error condition
-      $cpv = $self->_readCPV;
-      if (($cpv >= 0) and ($cpv != CPV_LF)) {
-        $cpv = SNERR_BADCR;
-      }
-    }
+    # Return the full string token
+    return [ $plain, SNSTRING_QUOTED, $payload ];
     
-    # Apply surrogate filtering
-    if (sn_utf8_highSurrogate($cpv)) {
-      # Read a high surrogate, so read the next codepoint
-      my $lo = $self->_readCPV;
-      
-      # Check what we read next
-      if (sn_utf8_lowSurrogate($lo)) {
-        # We got properly paired surrogates, so replace the read
-        # codepoint with the decoded value
-        $cpv = sn_utf8_unpair($cpv, $lo);
-        
-      } elsif ($lo < 0) {
-        # Some kind of error reading the low surrogate, so replace
-        # codepoint with that error status
-        $cpv = $lo;
-        
-      } else {
-        # Something other than a low surrogate was read, so replace
-        # codepoint with a pairing error
-        $cpv = SNERR_UNPAIRED;
-      }
-      
-    } elsif (sn_utf8_lowSurrogate($cpv)) {
-      # Reading a low surrogate is an error because surrogate pairs must
-      # begin with a high surrogate
-      $cpv = SNERR_UNPAIRED;
-    }
+  } elsif ($plain =~ /\{\z/) {
+    # Curlied string token -- read the payload
+    my $payload = $self->_readCurly;
+    (defined $payload) or return $self->{'_err'};
+  
+    # Trim off the opening curly
+    $plain = substr($plain, 0, -1);
     
-    # Update state
-    if ($cpv >= 0) {
-      # Got a filtered codepoint -- update _count
-      if ($self->{'_count'} == 0) {
-        # This is very first codepoint, so just change the line number
-        # to one
-        $self->{'_count'} = 1;
-        
-      } elsif ($self->{'_count'} > 0) {
-        # Not very first codepoint and line count has not overflown, so
-        # if an LF is leaving the buffer, increment line count, watching
-        # for overflow
-        if ($self->{'_c'} == CPV_LF) {
-          if ($self->{'_count'} < MAX_COUNT) {
-            $self->{'_count'}++;
-          } else {
-            $self->{'_count'} = -1;
-          }
-        }
-      }
-      
-      # Store the new filtered codepoint in the buffer
-      $self->{'_c'} = $cpv;
-      
-    } else {
-      # Error occured
-      $self->{'_c'} = $cpv;
-    }
-  }
+    # Return the full string token
+    return [ $plain, SNSTRING_CURLY, $payload ];
   
-  # Always clear the pushback flag here
-  $self->{'_push'} = 0;
-  
-  # Return the buffered codepoint or the buffered error status
-  return $self->{'_c'};
-}
-
-=item B<count()>
-
-Return the current line count.
-
-The first line of the file is line one.  C<undef> is returned in the
-unlikely event that the line count overflows.  (This only happens if
-there are trillions of lines.)
-
-The line count is affected by pushback mode, changing backwards if
-characters are pushed back before a line break.
-
-=cut
-
-sub count {
-  # Check parameter count
-  ($#_ == 0) or die "Wrong number of parameters, stopped";
-  
-  # Get self
-  my $self = shift;
-  (ref($self) and $self->isa(__PACKAGE__)) or
-    die "Wrong parameter type, stopped";
-  
-  # Get current line count
-  my $lcv = $self->{'_count'};
-  
-  # If count is negative, then return undef
-  ($lcv >= 0) or return undef;
-  
-  # If count is zero, indicating the very beginning of the file, change
-  # it to line one
-  if ($lcv == 0) {
-    $lcv = 1;
-  }
-  
-  # If we're not in pushback mode, _c is LF, and we're not at the very
-  # beginning of the file, then increment returned line count, watching
-  # for overflow
-  if ((not $self->{'_push'}) and ($self->{'_count'} > 0) and
-        ($self->{'_c'} == CPV_LF)) {
-    if ($lcv < MAX_COUNT) {
-      $lcv++;
-    } else {
-      $lcv = undef;
-    }
-  }
-  
-  # Return adjusted line count
-  return $lcv;
-}
-
-=item B<pushback()>
-
-Set pushback mode, so the next call to C<readCode> will once again
-return the codepoint that was just returned.
-
-This call is ignored if the filter is currently in EOF or some other
-error condition.
-
-Fatal errors occur if the filter is already in pushback mode or if no
-characters have been read yet.
-
-=cut
-
-sub pushback {
-  # Check parameter count
-  ($#_ == 0) or die "Wrong number of parameters, stopped";
-  
-  # Get self
-  my $self = shift;
-  (ref($self) and $self->isa(__PACKAGE__)) or
-    die "Wrong parameter type, stopped";
-  
-  # Only proceed if not in an error code state
-  if (($self->{'_count'} == 0) || ($self->{'_c'} >= 0)) {
-    # At least one codepoint must have already been read
-    ($self->{'_count'} > 0) or die "Invalid pushback, stopped";
-    
-    # Can't already be in pushback state
-    (not $self->{'_push'}) or die "Invalid pushback, stopped";
-    
-    # Set pushback flag
-    $self->{'_push'} = 1;
+  } else {
+    # Simple token that is not final token
+    return [ $plain ];
   }
 }
 
