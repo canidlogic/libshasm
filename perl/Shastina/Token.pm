@@ -236,6 +236,10 @@ sub wrap {
   my $self = { };
   bless($self, $class);
   
+  # The '_state' property is one if OK, zero if final token has been
+  # returned, negative if an error has been returned
+  $self->{'_state'} = 1;
+  
   # The '_fil' property stores the filter
   $self->{'_fil'} = $fil;
   
@@ -605,7 +609,9 @@ Read the next token from the Shastina file.
 
 If this returns a scalar, it is either an integer zero indicating the
 final C<|;> token was read, or it is a negative integer selecting one of
-the error codes from the C<Shastina::Const> module.
+the error codes from the C<Shastina::Const> module.  Once a scalar has
+been returned, that same scalar will be returned on all subsequent
+calls.
 
 If this returns a reference, then the reference will be to an array of
 length one or three.  If length one, then this is a simple token and the
@@ -628,19 +634,31 @@ sub readToken {
   (ref($self) and $self->isa(__PACKAGE__)) or
     die "Wrong parameter type, stopped";
   
+  # If already returned a scalar, just return that again
+  if ($self->{'_state'} < 1) {
+    return $self->{'_state'};
+  }
+  
   # Read a plain token
   my $plain = $self->_readPlain;
-  (defined $plain) or return $self->{'_err'};
+  unless (defined $plain) {
+    $self->{'_state'} = $self->{'_err'};
+    return $self->{'_err'};
+  }
   
   # Identify the type of token
   if ($plain eq '|;') {
     # Final token
+    $self->{'_state'} = 0;
     return 0;
     
   } elsif ($plain =~ /"\z/) {
     # Double-quote string token -- read the payload
     my $payload = $self->_readQuoted;
-    (defined $payload) or return $self->{'_err'};
+    unless (defined $payload) {
+      $self->{'_state'} = $self->{'_err'};
+      return $self->{'_err'};
+    }
     
     # Trim off the opening quote
     $plain = substr($plain, 0, -1);
@@ -651,7 +669,10 @@ sub readToken {
   } elsif ($plain =~ /\{\z/) {
     # Curlied string token -- read the payload
     my $payload = $self->_readCurly;
-    (defined $payload) or return $self->{'_err'};
+    unless (defined $payload) {
+      $self->{'_state'} = $self->{'_err'};
+      return $self->{'_err'};
+    }
   
     # Trim off the opening curly
     $plain = substr($plain, 0, -1);
