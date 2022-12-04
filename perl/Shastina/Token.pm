@@ -8,6 +8,9 @@ use Scalar::Util qw(looks_like_number);
 # Shastina modules
 use Shastina::Const qw(:CONSTANTS :ERROR_CODES);
 use Shastina::Filter;
+use Shastina::UTF8 qw(
+  sn_utf8_bytelen
+);
 
 =head1 NAME
 
@@ -86,7 +89,18 @@ use constant CPV_VISIBLE_MAX => 0x7e;
 
 # Maximum size of string data and tokens.
 #
-use constant MAX_STRING => 65535;
+# To match the behavior of the C library, these constants specify the
+# maximum length in encoded UTF-8 bytes, NOT in codepoints.
+#
+# These values are one less than the C constant values because Perl does
+# not require a nul termination byte.
+#
+# For string prefixes, the opening quote or left curly must fit within
+# the MAX_TOKEN limit, even though it is not present in the parsed
+# representation of the token.
+#
+use constant MAX_STRING => 65534;
+use constant MAX_TOKEN  => 65534;
 
 # Maximum curly nesting within curly string literals.
 #
@@ -282,9 +296,11 @@ sub _readQuoted {
   (ref($self) and $self->isa(__PACKAGE__)) or
     die "Wrong parameter type, stopped";
   
-  # Result starts out as empty string and escape count starts out zero
+  # Result starts out as empty string, escape count starts out zero, and
+  # byte length of result starts out at zero
   my $result = '';
   my $esc_count = 0;
+  my $bytelen = 0;
   
   # Processing loop
   while(1) {
@@ -325,8 +341,10 @@ sub _readQuoted {
     
     # Append character to result string, watching that string doesn't
     # get too large
-    if (length($result) < MAX_STRING) {
+    my $cplen = sn_utf8_bytelen($c);
+    if ($bytelen <= MAX_STRING - $cplen) {
       $result = $result . chr($c);
+      $bytelen += $cplen;
     } else {
       $self->{'_err'} = SNERR_LONGSTR;
       return undef;
@@ -361,11 +379,13 @@ sub _readCurly {
   (ref($self) and $self->isa(__PACKAGE__)) or
     die "Wrong parameter type, stopped";
   
-  # Result starts out as empty string, escape count starts out zero, and
-  # nest level starts out at one
+  # Result starts out as empty string, escape count starts out zero,
+  # nest level starts out at one, and byte length of result starts out
+  # at zero
   my $result = '';
   my $esc_count = 0;
   my $nest_level = 1;
+  my $bytelen = 0;
   
   # Processing loop
   while(1) {
@@ -424,8 +444,10 @@ sub _readCurly {
     
     # Append character to result string, watching that string doesn't
     # get too large
-    if (length($result) < MAX_STRING) {
+    my $cplen = sn_utf8_bytelen($c);
+    if ($bytelen <= MAX_STRING - $cplen) {
       $result = $result . chr($c);
+      $bytelen += $cplen;
     } else {
       $self->{'_err'} = SNERR_LONGSTR;
       return undef;
@@ -566,8 +588,10 @@ sub _readPlain {
       # Handling depends on character type
       if (_isInclusiveCode($c)) {
         # Inclusive character, so add the character to the token
-        # (checking for overflow), and then leave the loop
-        if (length($tks) < MAX_STRING) {
+        # (checking for overflow), and then leave the loop; since the
+        # set of legal characters only includes ASCII, we can assume
+        # here that each character is exactly one byte
+        if (length($tks) < MAX_TOKEN) {
           $tks = $tks . chr($c);
         } else {
           $self->{'_err'} = SNERR_LONGTOKEN;
@@ -584,8 +608,10 @@ sub _readPlain {
       } else {
         # Legal character, but neither inclusive nor exclusive, so add
         # the character to the token (checking for overflow), and
-        # continue on in the loop
-        if (length($tks) < MAX_STRING) {
+        # continue on in the loop; since the set of legal characters
+        # only includes ASCII, we can assume here that each character is
+        # exactly one byte
+        if (length($tks) < MAX_TOKEN) {
           $tks = $tks . chr($c);
         } else {
           $self->{'_err'} = SNERR_LONGTOKEN;
