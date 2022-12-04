@@ -21,6 +21,7 @@ Shastina::UTF8 - Shastina's built-in UTF-8 codec.
     sn_utf8_encode
     sn_utf8_trail
     sn_utf8_decode
+    sn_utf8_bytelen
   );
   
   # Check if an integer is in Unicode range, including surrogates
@@ -70,6 +71,9 @@ Shastina::UTF8 - Shastina's built-in UTF-8 codec.
     # Invalid UTF-8 encoding or overlong encoding
     ...
   }
+  
+  # Figure out how many encoded UTF-8 bytes in a codepoint
+  my $byte_count = sn_utf8_bytelen(0x2019);
 
 =head1 DESCRIPTION
 
@@ -413,6 +417,35 @@ sub sn_utf8_decode {
   return $result;
 }
 
+=item B<sn_utf8_bytelen(code)>
+
+Given a numeric Unicode codepoint value, determine how many bytes are in
+its UTF-8 encoding.
+
+The codepoint value must satisfy C<sn_utf8_isCodepoint()>.  The return
+value will be in range [1, 4].
+
+=cut
+
+sub sn_utf8_bytelen {
+  # Get parameter
+  ($#_ == 0) or die "Wrong number of parameters, stopped";
+  my $code = shift;
+  
+  (sn_utf8_isCodepoint($code)) or die "Invalid parameter type, stopped";
+  
+  # Return result
+  if ($code >= 0x10000) {
+    return 4;
+  } elsif ($code >= 0x800) {
+    return 3;
+  } elsif ($code >= 0x80) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+
 =back
 
 =cut
@@ -430,6 +463,7 @@ our @EXPORT_OK = qw(
   sn_utf8_encode
   sn_utf8_trail
   sn_utf8_decode
+  sn_utf8_bytelen
 );
 
 =head1 AUTHOR
