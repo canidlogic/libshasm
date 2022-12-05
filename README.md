@@ -5,13 +5,17 @@ The Shastina Metainterpreter (libshastina) is an implementation of the Shastina 
 
 The Shastina metalanguage is specified in `shastina_spec.md`.  See that document for further information about Shastina.
 
-The whole Shastina parsing library is contained in just the `shastina.c` and `shastina.h` source files.
+This library provides multiple implementations of the Shastina parser in different languages.  Each implementation is completely separate from all other implementations.  However, each implementation is designed to be functionally equivalent to each other implementation.
 
-A test program is provided as `shasm.c`.  See the source code in that program for an example of how to use the Shastina library.
+The `c` subdirectory contains a complete ANSI C implementation of the Shastina Metainterpreter.
+
+The `perl` subdirectory contains a complete Perl implementation of the Shastina Metainterpreter.
 
 ## Releases
 
 ### Development
+
+Added a complete implementation of the library in Perl, which is functionally equivalent to the C implementation.  `libshastina` now has implementations in multiple languages.
 
 Fixed escape handling within string literals.  Double quotes and curly braces are now only escaped if they are preceded by an odd-numbered sequence of backslashes, rather than always being escaped if preceded by a backslash.  This is not a backwards-compatible change, but escaping is otherwise broken for the common case where two backslashes are used to escape a literal backslash.
 
