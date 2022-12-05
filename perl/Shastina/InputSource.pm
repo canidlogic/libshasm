@@ -312,6 +312,14 @@ sub consume {
       $self->{'_fill'} = $rc;
     }
     
+    # If some bytes were already taken from buffer, then drop them from
+    # the start of the buffer
+    if ($self->{'_take'} > 0) {
+      $self->{'_buf'} = substr($self->{'_buf'}, $self->{'_take'});
+      $self->{'_fill'} -= $self->{'_take'};
+      $self->{'_take'} = 0;
+    }
+    
     # There is now at least one byte in the buffer; look for anything in
     # the buffer that is not SP HT CR LF
     if ($self->{'_buf'} =~ /[^ \t\r\n]/g) {
